@@ -1,0 +1,109 @@
+<Window x:Class="ClientGUI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:ClientGUI.ViewModels"
+        xmlns:views="clr-namespace:ClientGUI.Views"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:GameViewModel}"
+        Title="狼人杀 · 客户端"
+        Height="780" Width="1220" MinHeight="640" MinWidth="1000"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource BgBrush}"
+        Foreground="{DynamicResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        TextOptions.TextFormattingMode="Ideal"
+        UseLayoutRounding="True">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <!-- 用 pack URI 定位，保证从任意工作目录启动、或被其他宿主加载时都能解析。 -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/DarkTheme.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- 标题栏 -->
+            <RowDefinition Height="*" />     <!-- 主区域 -->
+            <RowDefinition Height="Auto" />  <!-- 状态栏 -->
+        </Grid.RowDefinitions>
+
+        <!-- ═══════════════ 标题栏 ═══════════════ -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}" Padding="18,12"
+                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="🐺" FontSize="20" VerticalAlignment="Center" />
+                    <TextBlock Text="狼人杀" FontSize="17" FontWeight="Bold" Margin="8,0,0,0"
+                               VerticalAlignment="Center" Foreground="{StaticResource TextBrush}" />
+                    <TextBlock Text="客户端" FontSize="12" Margin="8,2,0,0" VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedBrush}" />
+                </StackPanel>
+
+                <!-- 当前局势 + 退出房间 -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                            Visibility="{Binding IsJoined, Converter={StaticResource BoolToVisibility}}">
+                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
+                        <TextBlock Text="{Binding DayText}" FontSize="12.5" Foreground="{StaticResource TextBrush}" />
+                    </Border>
+                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
+                        <TextBlock Text="{Binding PhaseDisplay}" FontSize="12.5" FontWeight="SemiBold"
+                                   Foreground="{Binding PhaseBrush}" />
+                    </Border>
+                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
+                            Visibility="{Binding HasCountdown, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding CountdownText}" FontSize="12.5" Foreground="#FFFFCE6B" />
+                    </Border>
+                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
+                            BorderThickness="1" BorderBrush="{StaticResource BorderBrush2}">
+                        <TextBlock Text="{Binding ConnectionStatus}" FontSize="12" Foreground="{StaticResource MutedBrush}" />
+                    </Border>
+                    <Button Content="退出房间" Style="{StaticResource FlatButton}" Padding="12,6"
+                            Command="{Binding DisconnectCommand}"
+                            IsEnabled="{Binding CanLeaveRoom}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ═══════════════ 主区域（三栏） ═══════════════ -->
+        <Grid Grid.Row="1" Margin="14"
+              Visibility="{Binding ShowGamePanel, Converter={StaticResource BoolToVisibility}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="286" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="308" />
+            </Grid.ColumnDefinitions>
+
+            <views:PlayerPanel Grid.Column="0" />
+            <views:ChatPanel Grid.Column="1" x:Name="ChatView" Margin="14,0" />
+            <views:ActionPanel Grid.Column="2" />
+        </Grid>
+
+        <!-- ═══════════════ 状态栏 ═══════════════ -->
+        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" Padding="16,7"
+                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,1,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource MutedBrush}"
+                           Text="🟢 已连接服务器" Visibility="{Binding IsConnected, Converter={StaticResource BoolToVisibility}}" />
+                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="#FFE06060"
+                           Text="🔴 未连接" Visibility="{Binding IsConnected, Converter={StaticResource InverseBoolToVisibility}}" />
+
+                <TextBlock Grid.Column="1" Text="{Binding LogStatus}" FontSize="11.5" Margin="16,0"
+                           TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedBrush}" />
+
+                <TextBlock Grid.Column="2" Text="客户端 GUI · ClientGUI" FontSize="11" Foreground="#FF5E6A80" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

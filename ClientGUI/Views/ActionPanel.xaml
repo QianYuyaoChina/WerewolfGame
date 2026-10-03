@@ -1,0 +1,70 @@
+<UserControl x:Class="ClientGUI.Views.ActionPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:ClientGUI.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:GameViewModel}">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- 右栏：当前阶段可执行的操作 -->
+    <Border Background="{StaticResource PanelBrush}" CornerRadius="10"
+            BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" Padding="14">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Text="可执行操作" Style="{StaticResource SectionTitle}" />
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- 阶段提示 -->
+                    <Border Background="{StaticResource CardBrush}" CornerRadius="8" Padding="12,10"
+                            Margin="0,0,0,14">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding PhaseDisplay}" FontSize="14" FontWeight="SemiBold"
+                                           Foreground="{Binding PhaseBrush}" />
+                                <TextBlock Text="{Binding DayText}" FontSize="11.5" Margin="10,2,0,0"
+                                           Foreground="{StaticResource MutedBrush}" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding ActionHint}" FontSize="11.5" Margin="0,7,0,0"
+                                       TextWrapping="Wrap" Foreground="#FFA9B4C8"
+                                       Visibility="{Binding HasActionHint, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding Actions}"
+                                  ItemTemplate="{StaticResource ActionButtonTemplate}" />
+
+                    <!--
+                        空状态提示：早期版本用 DataTrigger 监听此 ItemsControl 所在面板里的
+                        Actions.Count，测量该 TextBlock 会再次让 ItemsControl 失效，
+                        形成无限测量递归（栈溢出）。改为纯 OneWay 绑定到视图模型属性。
+                    -->
+                    <TextBlock Text="当前阶段暂无可用操作，请等待服务器提示。"
+                               TextWrapping="Wrap" Margin="2,4,2,0"
+                               Foreground="{StaticResource MutedBrush}" FontSize="12"
+                               Visibility="{Binding IsActionsEmpty, Converter={StaticResource BoolToVisibility}}" />
+
+                    <Border Height="1" Background="{StaticResource BorderBrush2}" Margin="0,10,0,12" />
+
+                    <TextBlock Text="玩法提示" Style="{StaticResource SectionTitle}" />
+                    <TextBlock FontSize="11" Foreground="#FF8D9AB2" TextWrapping="Wrap"
+                               Text="· 夜晚：狼人选择击杀目标，预言家查验，女巫用药，守卫守护。&#x0a;· 白天：讨论后投票放逐一名玩家。&#x0a;· 猎人出局时可开枪带走一名玩家。&#x0a;· 指令与服务器约定一致：数字编号选择目标，-1 表示弃票 / 放弃。" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</UserControl>

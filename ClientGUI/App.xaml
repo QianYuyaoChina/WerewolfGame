@@ -1,0 +1,9 @@
+﻿<Application x:Class="ClientGUI.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ClientGUI">
+    <!-- 启动窗口由 App.OnStartup 决定（先登录，再进主窗口），因此不设 StartupUri。 -->
+    <Application.Resources>
+
+    </Application.Resources>
+</Application>

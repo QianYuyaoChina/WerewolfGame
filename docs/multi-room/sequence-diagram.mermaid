@@ -1,0 +1,78 @@
+%% ① 创建房间并开局
+sequenceDiagram
+    participant H as 房主GUI
+    participant GC as GameClient(房主)
+    participant HUB as GameHub
+    participant RM as RoomManager
+    participant R as GameRoom(A)
+
+    H->>GC: ConnectAndLoginAsync(url,user,pw)
+    GC->>HUB: Handshake/Confirm
+    GC->>HUB: Call(Op=join, JoinPayload)
+    HUB->>HUB: 账号校验/注册
+    HUB-->>GC: Ok=true (msg=ok)
+    H->>GC: CreateRoomAsync("新手房", "123")
+    GC->>HUB: Call(Op=createroom, {Name,Password})
+    HUB->>RM: CreateRoom(connId, name, pw)
+    RM->>R: new GameRoom(roomId, name, pw, ...)
+    RM->>R: AddOrReconnect(user, connId)
+    RM-->>HUB: (ok, roomId)
+    HUB-->>GC: Ok=true, payload{RoomId,Room}
+    R-->>GC: Push(State: RoomId/RoomName/Host 填充)
+    H->>GC: StartGameAsync()
+    GC->>HUB: Call(Op=start)
+    HUB->>RM: GetRoomByConnection(connId) -> R
+    HUB->>R: StartGame(connId)
+    R-->>GC: Push(Message 身份私聊) + Push(State: Running)
+
+%% ② 浏览房间列表 -> 输密码加入 -> 开局
+sequenceDiagram
+    participant G as 玩家GUI
+    participant GC as GameClient(玩家)
+    participant HUB as GameHub
+    participant RM as RoomManager
+    participant RA as GameRoom(A)
+
+    G->>GC: ListRoomsAsync()
+    GC->>HUB: Call(Op=roomlist)
+    HUB->>RM: List()
+    RM-->>HUB: RoomInfoDto[] (HasPassword/Status/人数/房主)
+    HUB-->>GC: Ok=true, payload=RoomListResult
+    G->>GC: JoinRoomAsync("ABCDE", "123")
+    GC->>HUB: Call(Op=joinroom, {RoomId,Password})
+    HUB->>RM: JoinRoom("ABCDE", connId, "123")
+    RM->>RA: VerifyPassword("123")
+    alt 密码错误 / 不存在 / 已开局 / 满员
+        RA-->>RM: false
+        RM-->>HUB: (false, 统一文案)
+        HUB-->>GC: Error("密码错误")
+        GC-->>G: 状态行标红，不进入
+    else 通过
+        RM->>RA: AddOrReconnect(user, connId)
+        RA-->>GC: Push(Message "X 加入") + Push(State)
+        RM-->>HUB: (true, reconnected=false)
+        HUB-->>GC: Ok=true (msg=joined)
+        G->>GC: StartGameAsync() (若为房主)
+    end
+
+%% ③ 断线重连恢复到原房间
+sequenceDiagram
+    participant GC as GameClient(玩家)
+    participant HUB as GameHub
+    participant RM as RoomManager
+    participant R as GameRoom(A)
+
+    Note over GC,HUB: 网络中断 -> SignalR 自动重连（新 ConnectionId）
+    GC->>GC: Reconnecting: _joined=false,_cipher=null
+    GC->>HUB: Handshake/Confirm（重新协商密钥+身份）
+    GC->>HUB: Call(Op=join, 账号)  // 内存中的 _username/_password
+    HUB->>HUB: 账号校验 + BindIdentity(newConn, user)
+    HUB-->>GC: Ok=true
+    GC->>HUB: Call(Op=joinroom, {RoomId=_roomId, Password=_roomPassword})
+    HUB->>RM: JoinRoom(_roomId, newConn, pw)
+    RM->>R: GetPlayerByName(user) -> 命中 -> 视为重连
+    R->>R: AddOrReconnect: 更新 ConnectionId, IsConnected=true
+    R-->>GC: Push(Message "X 重新连接") + 补发身份私聊 + Push(State)
+    RM-->>HUB: (true, reconnected=true)
+    HUB-->>GC: Ok=true (msg=reconnected)
+    GC-->>GC: _joined=true, Reconnected?.Invoke("身份已恢复")

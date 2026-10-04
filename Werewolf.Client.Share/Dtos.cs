@@ -28,6 +28,15 @@ public class GameStateDto
     /// <summary>本局生效的规则（时长 / 夜晚顺序 / 人数上下限）；老客户端可能为 null。</summary>
     public GameRules? Rules { get; set; }
 
+    /// <summary>当前所属房间号（5 位）。旧服务端可能为空字符串。</summary>
+    public string RoomId { get; set; } = "";
+
+    /// <summary>当前房间名。</summary>
+    public string RoomName { get; set; } = "";
+
+    /// <summary>当前房主用户名。</summary>
+    public string HostName { get; set; } = "";
+
     public List<PlayerDto> Players { get; set; } = new();
 }
 

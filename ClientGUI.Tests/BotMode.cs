@@ -39,13 +39,38 @@ public static class BotMode
             };
         }
 
+        string? roomId = null;
         foreach (var bot in bots)
         {
             try
             {
                 await bot.Client.ConnectAsync(url);
-                var res = await bot.Client.JoinAsync(bot.Name, "pw" + bot.Name);
-                Console.WriteLine($"[{bot.Name}] 加入 ok={res.ok} msg={res.msg}");
+
+                var login = await bot.Client.LoginAsync(bot.Name, "pw" + bot.Name);
+                if (!login.ok)
+                {
+                    Console.WriteLine($"[{bot.Name}] 登录失败：{login.msg}");
+                    continue;
+                }
+
+                if (roomId == null)
+                {
+                    var created = await bot.Client.CreateRoomAsync("机器人房", null);
+                    if (created.Ok)
+                    {
+                        roomId = created.RoomId;
+                        Console.WriteLine($"[{bot.Name}] 创建房间 {roomId}，成为房主");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[{bot.Name}] 建房失败：{created.Message}");
+                    }
+                }
+                else
+                {
+                    var joined = await bot.Client.JoinRoomAsync(roomId, null);
+                    Console.WriteLine($"[{bot.Name}] 加入房间 {roomId} ok={joined.Ok} msg={joined.Message}");
+                }
             }
             catch (Exception ex)
             {

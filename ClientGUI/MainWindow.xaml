@@ -91,6 +91,12 @@
                 <!-- 当前局势 + 退出房间 -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
                             Visibility="{Binding IsJoined, Converter={StaticResource BoolToVisibility}}">
+                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
+                            BorderThickness="1" BorderBrush="{StaticResource AccentBrush}"
+                            Visibility="{Binding HasRoomInfo, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding RoomHeaderText}" FontSize="12.5" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}" />
+                    </Border>
                     <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
                         <TextBlock Text="{Binding DayText}" FontSize="12.5" Foreground="{StaticResource TextBrush}" />
                     </Border>

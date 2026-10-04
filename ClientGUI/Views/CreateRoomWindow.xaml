@@ -1,0 +1,71 @@
+<Window x:Class="ClientGUI.Views.CreateRoomWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:ClientGUI.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:CreateRoomViewModel}"
+        Title="创建房间"
+        Height="368" Width="431"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BgBrush}"
+        Foreground="{DynamicResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        UseLayoutRounding="True"
+        KeyDown="Window_OnKeyDown">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid Margin="26,22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <!-- 房间名 -->
+            <RowDefinition Height="Auto" />
+            <!-- 密码 -->
+            <RowDefinition Height="Auto" />
+            <!-- 不设密码 -->
+            <RowDefinition Height="*" />
+            <!-- 提示 -->
+            <RowDefinition Height="Auto" />
+            <!-- 按钮 -->
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="房间名" Style="{StaticResource MutedText}" Margin="0,0,0,6" />
+            <TextBox x:Name="RoomNameInput" Style="{StaticResource FlatTextBox}"
+                     Text="{Binding RoomName, UpdateSourceTrigger=PropertyChanged}"
+                     MaxLength="40" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Margin="0,14,0,0">
+            <TextBlock Text="密码（可选）" Style="{StaticResource MutedText}" Margin="0,0,0,6" />
+            <PasswordBox x:Name="PasswordInput" Style="{StaticResource FlatPasswordBox}"
+                         IsEnabled="{Binding IsPasswordEnabled}"
+                         PasswordChanged="PasswordInput_OnPasswordChanged" />
+        </StackPanel>
+
+        <CheckBox Grid.Row="2" Margin="0,14,0,0"
+                  Content="不设密码（公开房间）"
+                  Foreground="{StaticResource TextBrush}"
+                  IsChecked="{Binding NoPassword, Mode=TwoWay}" />
+
+        <TextBlock Grid.Row="3" Margin="0,14,0,0" FontSize="11" TextWrapping="Wrap"
+                   Foreground="#FF6F7C93" VerticalAlignment="Top"
+                   Text="房间名可留空，将自动使用「你的用户名 的房间」。&#x0a;设置密码后，其他玩家需输入正确密码才能加入。" />
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="取消" Style="{StaticResource FlatButton}" Padding="18,8" Margin="0,0,10,0"
+                    Click="Cancel_OnClick" />
+            <Button Content="创建" Style="{StaticResource PrimaryButton}" Padding="18,8"
+                    Command="{Binding CreateCommand}" />
+        </StackPanel>
+    </Grid>
+</Window>

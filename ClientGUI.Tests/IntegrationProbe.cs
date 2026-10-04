@@ -6,8 +6,8 @@ using Werewolf.Client.Share.Crypto;
 namespace ClientGUI.Tests;
 
 /// <summary>
-/// 针对真实服务器的端到端校验：用 <see cref="GameClient"/> 连接、加入、开局，
-/// 并检查服务器推送的状态能否被正确反序列化。
+/// 针对真实服务器的端到端校验（多房间版）：
+/// 账号登录 → 建房（加密 / 公开）→ 他人按房间号加入 → 房间隔离 → 开局。
 /// 需要调用方先启动服务器（见 Program.cs 的 --server 参数）。
 /// </summary>
 public static class IntegrationProbe
@@ -31,237 +31,186 @@ public static class IntegrationProbe
 
         void Pass(string what) => notes.Add("✅ " + what);
 
-        var clients = new List<GameClient>();
-        var states = new Dictionary<string, GameStateDto>();
-        var privateMsgs = new Dictionary<string, List<string>>();
-        var chats = new List<string>();
+        var clients = new Dictionary<string, GameClient>(StringComparer.Ordinal);
+        var states = new Dictionary<string, GameStateDto>(StringComparer.Ordinal);
+        var messages = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
-        // SignalR 回调在别的线程上写入上面这些集合，读写都必须串行化，
-        // 否则在谓词里枚举实时集合会抛 “Collection was modified”。
+        // SignalR 回调在别的线程上写入集合，读写都必须串行化。
         var gate = new object();
 
-        List<GameStateDto> Snap() { lock (gate) return states.Values.ToList(); }
-        int StateCount() { lock (gate) return states.Count; }
+        GameClient Make(string name)
+        {
+            var c = new GameClient();
+            c.StateReceived += s => { lock (gate) states[name] = s; };
+            c.MessageReceived += m =>
+            {
+                lock (gate)
+                {
+                    if (!messages.TryGetValue(name, out var list)) messages[name] = list = new List<string>();
+                    list.Add(m);
+                }
+            };
+            clients[name] = c;
+            return c;
+        }
+
+        List<string> MessagesOf(string name)
+        {
+            lock (gate) return messages.TryGetValue(name, out var l) ? l.ToList() : new List<string>();
+        }
+
+        GameStateDto? StateOf(string name)
+        {
+            lock (gate) return states.TryGetValue(name, out var s) ? s : null;
+        }
+
+        var roomANames = new[] { "alice", "bob", "carol", "dave" };
+        var roomBNames = new[] { "eve", "frank" };
 
         try
         {
-            // ---------- 1. 四名玩家连接并加入 ----------
-            var names = new[] { "alice", "bob", "carol", "dave" };
-            foreach (var name in names)
+            // ---------- 1. 六名玩家登录（账号校验） ----------
+            foreach (var name in roomANames.Concat(roomBNames))
             {
-                var c = new GameClient();
-                var mine = name;
-                c.StateReceived += s => { lock (gate) states[mine] = s; };
-                c.MessageReceived += m =>
-                {
-                    lock (gate)
-                    {
-                        // 只统计玩家发言："💬 名字：内容"（讨论提示也是 💬 开头，需排除）
-                        if (m.StartsWith("💬") && m.Contains('：')
-                            && !m.Contains("自由讨论时间") && !m.Contains("加入了房间"))
-                            chats.Add(m);
-                        if (!privateMsgs.TryGetValue(mine, out var list))
-                            privateMsgs[mine] = list = new List<string>();
-                        list.Add(m);
-                    }
-                };
-                clients.Add(c);
-
+                var c = Make(name);
                 await c.ConnectAsync(url);
-                var res = await c.JoinAsync(name, "pw" + name);
-                if (!res.ok) Fail($"{name} 加入失败：{res.msg}");
+                var login = await c.LoginAsync(name, "pw" + name);
+                if (!login.ok) Fail($"{name} 登录失败：{login.msg}");
             }
+            if (ok) Pass("6 名玩家连接并登录（账号校验成功）");
 
-            if (ok) Pass("4 名玩家连接并加入房间");
+            // ---------- 2. 创建加密房 ----------
+            var roomA = await clients["alice"].CreateRoomAsync("新手房A", "123");
+            if (!roomA.Ok) Fail("alice 创建加密房失败：" + roomA.Message);
+            else Pass($"alice 创建加密房 {roomA.RoomId}（新手房A，密码 123），成为房主");
 
-            // ---------- 1.5 快速幂密钥协商 + PSK 身份认证 ----------
-            if (clients.All(c => c.IsEncrypted))
-                Pass("4 个客户端均已用快速幂完成 DH 协商并通过 PSK 身份校验（会话已加密）");
+            if (clients["alice"].CurrentRoomId != roomA.RoomId)
+                Fail("创建后 alice 的 CurrentRoomId 不是新房号");
             else
-                Fail("存在未建立会话密钥的客户端");
+                Pass("创建后客户端记住当前房间号");
 
-            var fingerprints = clients.Select(c => c.SessionKeyFingerprint).ToList();
-            if (fingerprints.All(f => f.Length > 0)
-                && fingerprints.Distinct(StringComparer.Ordinal).Count() == fingerprints.Count)
-                Pass("每个连接使用独立会话密钥（指纹互不相同）");
-            else
-                Fail("会话密钥指纹异常：" + string.Join(",", fingerprints));
+            // ---------- 3. 密码门禁 ----------
+            var wrong = await clients["bob"].JoinRoomAsync(roomA.RoomId, "definitely-wrong");
+            if (wrong.Ok) Fail("错误密码竟然加入成功");
+            else if (wrong.Message == ServerMessages.WrongPassword) Pass("加密房错误密码被拒（统一文案「密码错误」）");
+            else Fail("错误密码的提示不符合预期：" + wrong.Message);
 
-            // ---------- 2. 等待房间状态推送 ----------
-            // 注意：4 个客户端都收到过 State 并不代表它们都收到了「包含全部 4 人」的那一次广播，
-            // 因此要等到所有人都看到 4 名玩家，避免断言提前于最后一次广播。
-            await WaitUntil(() => StateCount() == 4 && Snap().All(s => s.Players.Count == 4), 8000);
-            if (StateCount() == 4 && Snap().All(s => s.Players.Count == 4))
-                Pass("所有客户端都收到了包含 4 人的 State 推送");
-            else
-                Fail($"状态未收敛：{StateCount()}/4 份状态，" +
-                     $"玩家数=[{string.Join(",", Snap().Select(s => s.Players.Count))}]");
-
-            var waiting = Snap().FirstOrDefault();
-            if (waiting == null) return new ProbeResult { Ok = false, Notes = { "❌ 没有收到初始状态" } };
-
-            // 服务器房间是长驻的：上一局结束后新玩家会看到 GameOver，两者都属于“未开局”。
-            if (waiting.Phase is not (Phases.Waiting or Phases.GameOver))
-                Fail($"未开局阶段应为 Waiting/GameOver，实际 {waiting.Phase}");
-            else
-                Pass($"开局前阶段为 {waiting.Phase}（服务器房间长驻，两者都合法）");
-
-            if (waiting.Players.Count != 4) Fail($"玩家数应为 4，实际 {waiting.Players.Count}");
-            else Pass("玩家列表包含 4 人");
-
-            if (waiting.Players.Count(p => p.IsHost) != 1) Fail("应恰好有 1 名房主");
-            else Pass("房主标记正确");
-
-            if (waiting.Players.Count(p => p.IsYou) != 1) Fail("每份状态应恰好标记 1 个 IsYou");
-            else Pass("IsYou 标记正确");
-
-            // ---------- 2.5 服务端下发的规则 ----------
-            var rules = waiting.Rules;
-            if (rules == null)
+            // ---------- 4. 正确密码加入 ----------
+            var joinFailures = new List<string>();
+            foreach (var name in new[] { "bob", "carol", "dave" })
             {
-                Fail("状态里没有下发游戏规则（Rules 为空）");
+                var jr = await clients[name].JoinRoomAsync(roomA.RoomId, "123");
+                if (!jr.Ok) joinFailures.Add($"{name}:{jr.Message}");
             }
-            else if (rules.NightActionSeconds > 0 && rules.VoteSeconds > 0
-                     && rules.MinPlayers > 0 && rules.NightOrder.Contains("狼人"))
+            if (joinFailures.Count == 0) Pass("bob/carol/dave 以正确密码加入加密房");
+            else Fail("正确密码加入失败：" + string.Join(", ", joinFailures));
+
+            // ---------- 5. 第二个房间（公开） ----------
+            var roomB = await clients["eve"].CreateRoomAsync("公开房B", null);
+            if (!roomB.Ok) Fail("eve 创建公开房失败：" + roomB.Message);
+            else Pass($"eve 创建公开房 {roomB.RoomId}（公开房B，无密码）");
+
+            var fj = await clients["frank"].JoinRoomAsync(roomB.RoomId, null);
+            if (!fj.Ok) Fail("frank 加入公开房失败：" + fj.Message);
+            else Pass("frank 无需密码加入公开房");
+
+            // ---------- 6. 房间列表包含两个新房间 ----------
+            var listRes = await clients["alice"].ListRoomsAsync();
+            var aInfo = listRes.Rooms.FirstOrDefault(r => r.Id == roomA.RoomId);
+            var bInfo = listRes.Rooms.FirstOrDefault(r => r.Id == roomB.RoomId);
+            if (aInfo == null || bInfo == null)
             {
-                Pass($"状态携带服务端规则（夜晚 {rules.NightActionSeconds}s / 投票 {rules.VoteSeconds}s / " +
-                     $"最少 {rules.MinPlayers} 人 / 顺序 {string.Join("→", rules.NightOrder)}）");
+                Fail("房间列表未包含两个新建房间");
             }
             else
             {
-                Fail("规则字段与预期不符：" + JsonSerializer.Serialize(rules));
-            }
-
-            // ---------- 3. 非房主不能开始 ----------
-            var guest = clients[1];
-            var guestStart = await guest.StartGameAsync();
-            if (guestStart.ok) Fail("非房主竟然可以开始游戏");
-            else Pass("非房主无法开始游戏：" + guestStart.msg);
-
-            // ---------- 4. 房主开始游戏 → 收到身份 ----------
-            var start = await clients[0].StartGameAsync();
-            if (!start.ok) Fail("房主开始游戏失败：" + start.msg);
-            else Pass("房主成功开始游戏");
-
-            await WaitUntil(() =>
-            {
-                lock (gate) return privateMsgs.Values.Any(v => v.Any(m => m.Contains("你的身份是")));
-            }, 5000);
-
-            List<KeyValuePair<string, List<string>>> roleMsgs;
-            lock (gate)
-                roleMsgs = privateMsgs.Where(kv => kv.Value.Any(m => m.Contains("你的身份是"))).ToList();
-
-            if (roleMsgs.Count == 4) Pass("4 名玩家都收到了身份私聊");
-            else Fail($"只有 {roleMsgs.Count}/4 名玩家收到身份私聊");
-
-            if (roleMsgs.All(kv => ParseRole(kv.Value) == states[kv.Key].YourRole))
-                Pass("私聊身份与 State 中的 YourRole 一致");
-            else
-                Fail("私聊身份与 State 中的 YourRole 不一致");
-
-            // ---------- 5. 夜晚：狼人与女巫按时限行动 ----------
-            await WaitUntil(() => Snap().Any(s => s.Phase == Phases.Night), 8000);
-            if (Snap().All(s => s.Phase == Phases.Night || s.Phase == Phases.Waiting))
-                Pass("进入 Night 阶段");
-            else
-                Fail("未按预期进入 Night 阶段：" + string.Join("/", Snap().Select(s => s.Phase).Distinct()));
-
-            // 女巫用解药、狼人选目标，尽快推进夜晚。
-            // 服务端按规则配置的夜晚顺序串行等待（默认 守卫→狼人→女巫→预言家），
-            // 未轮到自己的提交会被忽略，因此这里按“服务端下发的顺序”逐个等待并提交。
-            var nightActors = Snap().FirstOrDefault(s => s.Rules != null)?.Rules?.NightOrder is { Count: > 0 } configured
-                ? configured.ToArray()
-                : new[] { Roles.Guard, Roles.Werewolf, Roles.Witch, Roles.Seer };
-            foreach (var actor in nightActors)
-            {
-                // 等服务器广播“当前轮到该角色”。
-                await WaitUntil(() =>
-                {
-                    lock (gate) return states.Values.Any(s => s.Phase == Phases.Night && s.ActingRole == actor);
-                }, 5000);
-
-                // 找到扮演该角色的存活客户端并提交。
-                foreach (var (name, client) in names.Zip(clients))
-                {
-                    var s = states[name];
-                    if (s.Phase != Phases.Night || s.ActingRole != actor || !s.IsAlive) continue;
-                    if (s.YourRole != actor) continue;
-
-                    switch (actor)
-                    {
-                        case Roles.Werewolf:
-                            await client.NightActionAsync(1, "do");
-                            break;
-                        case Roles.Witch:
-                            await client.NightActionAsync(-2, "heal");
-                            break;
-                        case Roles.Seer:
-                            await client.NightActionAsync(2, "do");
-                            break;
-                        case Roles.Guard:
-                            await client.NightActionAsync(3, "do");
-                            break;
-                    }
-                }
-            }
-            Pass($"夜间行动已按服务端下发的顺序提交（{string.Join("/", nightActors)}）");
-
-            // ---------- 6. 白天 → 讨论 → 投票 ----------
-            await WaitUntil(() => Snap().Any(s => s.Phase == Phases.Vote), 60_000);
-            if (Snap().Any(s => s.Phase == Phases.Vote))
-                Pass("夜晚结束后进入 Vote 阶段");
-            else
-                Fail("未能进入 Vote 阶段，当前：" + string.Join("/", Snap().Select(s => s.Phase).Distinct()));
-
-            // 全员投票给 1 号
-            foreach (var (name, client) in names.Zip(clients))
-            {
-                if (!states[name].IsAlive) continue;
-                await client.VoteAsync(1);
-            }
-
-            // ---------- 7. 聊天（必须由存活玩家发言，服务器会忽略出局玩家的发言） ----------
-            await WaitUntil(() => StateCount() == 4 && Snap().All(s => s.Players.Count == 4), 5000);
-
-            var speakerIndex = -1;
-            for (var i = 0; i < names.Length; i++)
-            {
-                var me = states[names[i]].Players.FirstOrDefault(p => p.IsYou);
-                if (me is { IsAlive: true }) { speakerIndex = i; break; }
-            }
-
-            if (speakerIndex < 0)
-            {
-                Fail("没有存活玩家可以发言");
-            }
-            else
-            {
-                var speaker = names[speakerIndex];
-                await clients[speakerIndex].ChatAsync("大家好，这是 GUI 客户端的联调测试。");
-                await WaitUntil(() => { lock (gate) return chats.Count > 0; }, 5000);
-
-                List<string> chatSnapshot;
-                lock (gate) chatSnapshot = chats.ToList();
-
-                if (chatSnapshot.Count > 0 && chatSnapshot[0].Contains(speaker) && chatSnapshot[0].Contains("联调测试"))
-                    Pass($"聊天消息已广播（{speaker}）：" + chatSnapshot[0]);
+                var aOk = aInfo.HasPassword && aInfo.Host == "alice" && aInfo.PlayerCount >= 4
+                          && aInfo.Status == RoomStatus.Waiting;
+                var bOk = !bInfo.HasPassword && bInfo.Host == "eve";
+                if (aOk && bOk)
+                    Pass($"房间列表正确（A：加密/房主alice/{aInfo.PlayerCount}人/等待中；B：公开/房主eve）");
                 else
-                    Fail("未收到聊天广播，实际：" +
-                         (chatSnapshot.Count == 0 ? "无" : string.Join(" | ", chatSnapshot)));
+                    Fail("房间列表字段异常：A=" + JsonSerializer.Serialize(aInfo) +
+                         " B=" + JsonSerializer.Serialize(bInfo));
             }
 
-            // ---------- 8. 状态里能看到投票结果（放逐或平票） ----------
-            await WaitUntil(() => Snap().Any(s =>
-                s.Phase is Phases.Day or Phases.Discussion or Phases.Night or Phases.GameOver
-                && s.Players.Any(p => !p.IsAlive)), 30_000);
+            // ---------- 7. 状态推送携带房间信息 ----------
+            await WaitUntil(() => StateOf("alice") is { } s && s.RoomId == roomA.RoomId, 5000);
+            var aState = StateOf("alice");
+            if (aState != null && aState.RoomId == roomA.RoomId
+                && aState.RoomName == "新手房A" && aState.HostName == "alice")
+                Pass("状态推送携带房间号/房间名/房主");
+            else
+                Fail("状态未携带正确房间信息：" +
+                     (aState == null ? "无状态" : $"{aState.RoomId}/{aState.RoomName}/{aState.HostName}"));
 
-            var anyDeath = Snap().Any(s => s.Players.Any(p => !p.IsAlive));
-            var anyNight2 = Snap().Any(s => s.Day >= 2);
-            if (anyDeath || anyNight2) Pass("投票/夜晚的后续流程正常推进");
-            else notes.Add("ℹ️ 本轮未出现死亡（平票或平安夜），不做判定");
+            if (clients["alice"].CurrentRoomId == roomA.RoomId && clients["eve"].CurrentRoomId == roomB.RoomId)
+                Pass("客户端 CurrentRoomId 与所在房间一致");
+            else
+                Fail("客户端 CurrentRoomId 不一致");
 
-            // ---------- 9. JSON 契约：直接用服务器传来的形状反序列化 ----------
+            // ---------- 8. 房间隔离：A 房消息不出现在 B 房 ----------
+            await clients["alice"].ChatAsync("A房专属消息-A1");
+            await clients["eve"].ChatAsync("B房专属消息-B1");
+            await Task.Delay(700);
+
+            var daveMsgs = MessagesOf("dave");
+            var eveMsgs = MessagesOf("eve");
+            var aliceMsgs = MessagesOf("alice");
+            var frankMsgs = MessagesOf("frank");
+
+            if (daveMsgs.Any(m => m.Contains("A房专属消息-A1"))) Pass("A 房内消息送达到同房玩家 dave");
+            else Fail("A 房消息未送达同房玩家 dave");
+
+            if (!eveMsgs.Any(m => m.Contains("A房专属消息-A1"))) Pass("A 房消息未泄漏到 B 房（房间隔离生效）");
+            else Fail("A 房消息泄漏到了 B 房！");
+
+            if (frankMsgs.Any(m => m.Contains("B房专属消息-B1"))) Pass("B 房内消息送达到同房玩家 frank");
+            else Fail("B 房消息未送达同房玩家 frank");
+
+            if (!aliceMsgs.Any(m => m.Contains("B房专属消息-B1"))) Pass("B 房消息未泄漏到 A 房（房间隔离生效）");
+            else Fail("B 房消息泄漏到了 A 房！");
+
+            // ---------- 9. 开局（仅房主） ----------
+            var guestStart = await clients["bob"].StartGameAsync();
+            if (guestStart.ok) Fail("非房主竟然可以开局");
+            else Pass("非房主无法开局：" + guestStart.msg);
+
+            var start = await clients["alice"].StartGameAsync();
+            if (!start.ok) Fail("房主开局失败：" + start.msg);
+            else Pass("房主成功开局");
+
+            await WaitUntil(() => roomANames.All(n => MessagesOf(n).Any(m => m.Contains("你的身份是"))), 8000);
+            var gotRoles = roomANames.Count(n => MessagesOf(n).Any(m => m.Contains("你的身份是")));
+            if (gotRoles == 4) Pass("A 房 4 名玩家均收到身份私聊");
+            else Fail($"A 房只有 {gotRoles}/4 收到身份私聊");
+
+            if (MessagesOf("eve").Any(m => m.Contains("你的身份是")))
+                Fail("B 房玩家收到了 A 房的身份私聊（隔离破坏）");
+            else Pass("B 房玩家未收到 A 房身份私聊");
+
+            // ---------- 9.2 B 房不受 A 房开局影响 ----------
+            var eveState = StateOf("eve");
+            if (eveState != null && eveState.Players.Count == 2
+                && eveState.Phase is Phases.Waiting or Phases.GameOver
+                && eveState.RoomId == roomB.RoomId)
+                Pass("B 房保持自身状态（未受 A 房开局影响）");
+            else
+                Fail($"B 房状态异常：{eveState?.Phase}/{eveState?.Players.Count}");
+
+            // ---------- 9.3 心跳 ----------
+            try
+            {
+                var latency = await clients["alice"].PingAsync();
+                if (latency >= 0 && latency < 5000) Pass($"心跳往返正常（{latency} ms）");
+                else Fail("心跳时延异常：" + latency + " ms");
+            }
+            catch (Exception ex)
+            {
+                Fail("心跳失败：" + ex.Message);
+            }
+
+            // ---------- 9.4 JSON 契约：用服务器传来的形状反序列化 ----------
             var wire = JsonNode.Parse("""
             {
               "Phase": "Night",
@@ -270,6 +219,9 @@ public static class IntegrationProbe
               "YourRole": "狼人",
               "YourRoleDesc": "夜晚与队友共同击杀一名玩家，白天伪装成好人。",
               "IsAlive": true,
+              "RoomId": "ABCDE",
+              "RoomName": "新手房",
+              "HostName": "alice",
               "Players": [
                 { "Id": 0, "Name": "alice", "IsAlive": true, "IsHost": true, "IsYou": false, "IsConnected": true, "Role": "狼人" },
                 { "Id": 1, "Name": "bob", "IsAlive": false, "IsHost": false, "IsYou": true, "IsConnected": false, "Role": null }
@@ -279,26 +231,21 @@ public static class IntegrationProbe
 
             var parsed = wire.Deserialize<GameStateDto>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (parsed is { Phase: "Night", Day: 2, YourId: 1, YourRole: "狼人", IsAlive: true }
+                && parsed.RoomId == "ABCDE" && parsed.RoomName == "新手房" && parsed.HostName == "alice"
                 && parsed.Players.Count == 2
                 && parsed.Players[0] is { Id: 0, Name: "alice", IsHost: true, IsYou: false, IsConnected: true, Role: "狼人" }
                 && parsed.Players[1] is { IsAlive: false, IsYou: true, IsConnected: false, Role: null })
-                Pass("DTO 与服务器 JSON 形状匹配（含 null Role / 断线标记）");
+                Pass("DTO 与服务器 JSON 形状匹配（含房间字段 / null Role / 断线标记）");
             else
                 Fail("DTO 反序列化结果与预期不符");
 
-            // ---------- 9.5 心跳 ----------
-            try
-            {
-                var latency = await clients[0].PingAsync();
-                if (latency >= 0 && latency < 5000)
-                    Pass($"心跳往返正常（{latency} ms）");
-                else
-                    Fail("心跳时延异常：" + latency + " ms");
-            }
-            catch (Exception ex)
-            {
-                Fail("心跳失败：" + ex.Message);
-            }
+            // ---------- 9.5 离开房间（不拆连接） ----------
+            var left = await clients["frank"].LeaveRoomAsync();
+            if (left.ok && !clients["frank"].IsJoined && clients["frank"].IsConnected)
+                Pass("frank 退出房间成功且连接保留");
+            else
+                Fail($"frank 退出房间异常：ok={left.ok} joined={clients["frank"].IsJoined} " +
+                     $"connected={clients["frank"].IsConnected}");
 
             // ---------- 10. 身份认证：错误的预共享密钥必须被拒绝 ----------
             var originalPsk = Environment.GetEnvironmentVariable(PreSharedKey.EnvironmentVariable);
@@ -337,22 +284,13 @@ public static class IntegrationProbe
         }
         finally
         {
-            foreach (var c in clients)
+            foreach (var c in clients.Values)
             {
                 try { await c.DisposeAsync(); } catch { }
             }
         }
 
         return new ProbeResult { Ok = ok, Notes = notes };
-    }
-
-    private static string? ParseRole(List<string> messages)
-    {
-        var msg = messages.FirstOrDefault(m => m.Contains("你的身份是"));
-        if (msg == null) return null;
-        var start = msg.IndexOf("【", StringComparison.Ordinal);
-        var end = msg.IndexOf("】", StringComparison.Ordinal);
-        return start >= 0 && end > start ? msg[(start + 1)..end] : null;
     }
 
     private static async Task WaitUntil(Func<bool> condition, int timeoutMs)

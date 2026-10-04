@@ -27,7 +27,7 @@ public partial class MainWindow : Window
         _vm = new GameViewModel(session);
         DataContext = _vm;
 
-        _vm.SessionEnded += OnSessionEnded;
+        _vm.RoomLeft += OnRoomLeft;
 
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -108,8 +108,8 @@ public partial class MainWindow : Window
         UiStateStore.Save();
     }
 
-    /// <summary>退出房间：关闭本窗口，由 <see cref="App"/> 重新显示登录窗口。</summary>
-    private void OnSessionEnded()
+    /// <summary>退出房间：关闭本窗口，由 <see cref="App"/> 重新显示房间列表（连接不拆）。</summary>
+    private void OnRoomLeft()
     {
         IsLoggedOut = true;
         Dispatcher.BeginInvoke(new Action(Close));
@@ -121,7 +121,7 @@ public partial class MainWindow : Window
         // 无论主动退出房间还是直接关窗，都先记住界面状态。
         SaveUiState();
 
-        if (IsLoggedOut) return;   // 退出房间时连接已经断开
+        if (IsLoggedOut) return;   // 退出房间时不拆连接（回到房间列表继续用）
 
         try
         {

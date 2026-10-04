@@ -24,6 +24,9 @@ public sealed class UiState
     // ---- 登录窗口：上次填过的地址与用户名（不保存密码） ----
     public string ServerUrl { get; set; } = "";
     public string Username { get; set; } = "";
+
+    // ---- 房间列表：上次进入过的房间号（便于回填 / 提示） ----
+    public string LastRoomId { get; set; } = "";
 }
 
 /// <summary>

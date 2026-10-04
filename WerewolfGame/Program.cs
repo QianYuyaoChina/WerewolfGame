@@ -13,7 +13,14 @@ builder.Services.AddSingleton<EncryptedChannel>();
 var rules = builder.Configuration.GetSection("GameRules").Get<GameRules>() ?? new GameRules();
 builder.Services.AddSingleton(rules);
 
-builder.Services.AddSingleton<GameRoomService>();
+// 房间运行参数（宽限期 / 房间上限 / 扫描间隔）从 appsettings.json 的 Room 节点读取。
+var roomOptions = builder.Configuration.GetSection("Room").Get<RoomOptions>() ?? new RoomOptions();
+builder.Services.AddSingleton(roomOptions);
+
+// 多房间：注册表（纯注册表）+ 后台回收服务（周期回收空房）。
+builder.Services.AddSingleton<RoomManager>();
+builder.Services.AddHostedService<RoomRecycleService>();
+
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
@@ -32,5 +39,7 @@ Console.WriteLine("传输加密：PSK 认证 DH 握手 + AES-GCM 会话加密（
 Console.WriteLine($"游戏规则：夜晚单步 {rules.NightActionSeconds} 秒 · 讨论 {rules.DiscussionSeconds} 秒 · " +
                   $"投票 {rules.VoteSeconds} 秒 · 人数 {rules.MinPlayers}-{rules.MaxPlayers}");
 Console.WriteLine($"夜晚顺序：{string.Join(" → ", RoleInfo.ResolveNightOrder(rules.NightOrder))}");
+Console.WriteLine($"多房间：上限 {roomOptions.MaxRooms} 个 · 空房宽限 {roomOptions.EmptyGraceSeconds} 秒 · " +
+                  $"扫描间隔 {roomOptions.RecycleScanSeconds} 秒");
 Console.WriteLine($"账号文件：{Path.GetFullPath("accounts.json")}");
 app.Run();

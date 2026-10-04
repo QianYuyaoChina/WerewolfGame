@@ -32,6 +32,8 @@ public static class UiSmokeCheck
                     $"UI：版本号界面友好（{AppInfo.Version}）");
 
                 Try("LoginWindow", () => new LoginWindow());
+                Try("RoomListWindow", () => new RoomListWindow(new GameClient()));
+                Try("CreateRoomWindow", () => new CreateRoomWindow());
                 Try("MainWindow", () => new MainWindow(new GameClient()));
                 Try("AboutWindow", () => new AboutWindow());
                 Try("ChangelogWindow", () => new ChangelogWindow());

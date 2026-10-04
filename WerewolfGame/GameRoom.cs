@@ -17,6 +17,12 @@ public class GameRoom
     private readonly EncryptedChannel _channel;
     private readonly object _sync = new();
 
+    /// <summary>房间密码的存储值（<see cref="RoomPassword.Hash"/> 的结果）；无密码为 null。绝不出房间对象。</summary>
+    private readonly string? _passwordHash;
+
+    /// <summary>无在线玩家起始时间（UTC）；有在线玩家为 null，用于宽限期回收判定。</summary>
+    private DateTime? _emptySince;
+
     private Phase _phase = Phase.Waiting;
     private int _day;
     private volatile bool _running;
@@ -29,15 +35,113 @@ public class GameRoom
     private int _witchHealTarget = -1;
     private int _witchPoisonTarget = -1;
 
-    public GameRoom(EncryptedChannel channel, GameRules rules)
+    /// <summary>
+    /// 构造一个房间。密码为 null/空白时视为公开房间；否则仅保存带盐哈希（不保存明文）。
+    /// </summary>
+    public GameRoom(string id, string name, string? password, EncryptedChannel channel, GameRules rules)
     {
+        Id = id ?? "";
+        Name = string.IsNullOrWhiteSpace(name) ? "房间" : name.Trim();
         _channel = channel;
         _rules = rules;
         _nightOrder = RoleInfo.ResolveNightOrder(rules.NightOrder);
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            HasPassword = false;
+            _passwordHash = null;
+        }
+        else
+        {
+            HasPassword = true;
+            _passwordHash = RoomPassword.Hash(Id, password);
+        }
+
+        CreatedAt = DateTime.UtcNow;
     }
+
+    // ==================== 房间身份信息（只读快照） ====================
+
+    /// <summary>5 位房间号，唯一标识。</summary>
+    public string Id { get; }
+
+    /// <summary>房间名（可重名）。</summary>
+    public string Name { get; }
+
+    /// <summary>是否设置了密码。</summary>
+    public bool HasPassword { get; }
+
+    /// <summary>创建时间（UTC），列表按此排序。</summary>
+    public DateTime CreatedAt { get; }
+
+    /// <summary>房主用户名（取房间内 IsHost 的玩家；无则 ""）。</summary>
+    public string HostUsername
+    {
+        get { lock (_sync) return _players.FirstOrDefault(p => p.IsHost)?.Username ?? ""; }
+    }
+
+    /// <summary>名单人数。</summary>
+    public int PlayerCount { get { lock (_sync) return _players.Count; } }
+
+    /// <summary>在线人数（已连接且持有连接号）。</summary>
+    public int ConnectedCount
+    {
+        get { lock (_sync) return _players.Count(p => p.IsConnected && !string.IsNullOrEmpty(p.ConnectionId)); }
+    }
+
+    /// <summary>无在线玩家的起始时间（UTC）；有在线玩家时为 null。</summary>
+    public DateTime? EmptySince { get { lock (_sync) return _emptySince; } }
 
     public bool IsRunning { get { lock (_sync) return _running; } }
     public Phase Phase { get { lock (_sync) return _phase; } }
+
+    /// <summary>
+    /// 维护在线占用时间戳：有在线玩家时清空 <see cref="EmptySince"/>；
+    /// 归零时记录首次归零时间（保留最早值，便于宽限期判定）。每次玩家增/减后调用。
+    /// </summary>
+    public void TouchOccupancy()
+    {
+        lock (_sync)
+        {
+            var anyOnline = _players.Any(p => p.IsConnected && !string.IsNullOrEmpty(p.ConnectionId));
+            if (anyOnline) _emptySince = null;
+            else _emptySince ??= DateTime.UtcNow;
+        }
+    }
+
+    /// <summary>校验密码：公开房间一律放行；加密房间比对带盐哈希。</summary>
+    public bool VerifyPassword(string? password)
+        => !HasPassword || RoomPassword.Verify(Id, password, _passwordHash);
+
+    /// <summary>按用户名（忽略大小写）查找房间内玩家。</summary>
+    public Player? GetPlayerByName(string username)
+    {
+        lock (_sync)
+            return _players.FirstOrDefault(p =>
+                string.Equals(p.Username, username, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>生成房间列表摘要。</summary>
+    public RoomInfoDto ToInfo()
+    {
+        lock (_sync)
+        {
+            var status = _running
+                ? RoomStatus.Running
+                : _phase == Phase.GameOver ? RoomStatus.GameOver : RoomStatus.Waiting;
+
+            return new RoomInfoDto
+            {
+                Id = Id,
+                Name = Name,
+                PlayerCount = _players.Count,
+                MaxPlayers = _rules.MaxPlayers,
+                Status = status,
+                HasPassword = HasPassword,
+                Host = _players.FirstOrDefault(p => p.IsHost)?.Username ?? ""
+            };
+        }
+    }
 
     // ==================== 玩家管理 ====================
 
@@ -54,7 +158,7 @@ public class GameRoom
             if (existing != null)
             {
                 if (existing.IsConnected && existing.ConnectionId != connId)
-                    return (false, "该账号已在房间中", null, false);
+                    return (false, ServerMessages.AlreadyInRoom, null, false);
 
                 existing.ConnectionId = connId;
                 existing.IsConnected = true;
@@ -63,11 +167,11 @@ public class GameRoom
 
             // ---- 新玩家 ----
             if (_running)
-                return (false, "游戏进行中，无法加入", null, false);
+                return (false, ServerMessages.GameInProgress, null, false);
             if (_phase != Phase.Waiting && _phase != Phase.GameOver)
-                return (false, "房间暂未开放", null, false);
+                return (false, ServerMessages.GameInProgress, null, false);
             if (_players.Count >= _rules.MaxPlayers)
-                return (false, $"房间已满（最多 {_rules.MaxPlayers} 人）", null, false);
+                return (false, ServerMessages.RoomFull(_rules.MaxPlayers), null, false);
             if (string.IsNullOrWhiteSpace(username))
                 return (false, "用户名不能为空", null, false);
 
@@ -120,7 +224,10 @@ public class GameRoom
 
             var host = _players.FirstOrDefault(p => p.IsHost);
             if (host == null || host.ConnectionId != connId)
-                return (false, "只有房主可以开始游戏");
+                return (false, ServerMessages.OnlyHostCanStart);
+
+            // 重开：先清掉上一局的夜晚/猎人等临时数据，保证是干净的一局。
+            if (_phase == Phase.GameOver) ResetForNewGame(connId);
 
             // 清理断线玩家
             _players.RemoveAll(p => !p.IsConnected);
@@ -149,6 +256,33 @@ public class GameRoom
         }
         _ = Task.Run(RunAsync);
         return (true, "");
+    }
+
+    /// <summary>
+    /// 重开一局前的清场：清空上一局的夜晚/投票/猎人等临时数据（保留玩家名单与房主）。
+    /// 由 <c>StartGame</c> 在 <c>_phase == GameOver</c> 时调用。
+    /// </summary>
+    public (bool ok, string msg) ResetForNewGame(string connId)
+    {
+        lock (_sync)
+        {
+            _wolfTarget = _guardTarget = _witchHealTarget = _witchPoisonTarget = -1;
+            _actingRole = null;
+            _day = 0;
+
+            foreach (var p in _players)
+            {
+                p.NightTarget = -1;
+                p.NightActionType = null;
+                p.NightActionSubmitted = false;
+                p.VoteTarget = -1;
+                p.VoteSubmitted = false;
+                p.HunterCanShoot = false;
+                p.HunterShotSubmitted = false;
+            }
+
+            return (true, "");
+        }
     }
 
     private void AssignRoles()
@@ -715,14 +849,15 @@ public class GameRoom
 
         foreach (var viewer in viewers)
         {
-            var dto = BuildStateFor(viewer, all, phase, day, running, actingRole, _rules);
+            var dto = BuildStateFor(viewer, all, phase, day, running, actingRole, _rules, Id, Name);
             await _channel.SendStateAsync(viewer.ConnectionId, dto);
         }
     }
 
     private static GameStateDto BuildStateFor(Player viewer, List<Player> all,
                                               Phase phase, int day, bool running,
-                                              Role? actingRole, GameRules rules)
+                                              Role? actingRole, GameRules rules,
+                                              string roomId, string roomName)
     {
         bool revealAll = !running || phase == Phase.GameOver;
 
@@ -736,6 +871,9 @@ public class GameRoom
             IsAlive = viewer.IsAlive,
             ActingRole = actingRole.HasValue ? RoleInfo.Name(actingRole.Value) : "",
             Rules = rules,
+            RoomId = roomId,
+            RoomName = roomName,
+            HostName = all.FirstOrDefault(p => p.IsHost)?.Username ?? "",
             Players = all.Select((p, i) => new PlayerDto
             {
                 Id = i,
@@ -751,10 +889,4 @@ public class GameRoom
             }).ToList()
         };
     }
-}
-
-public class GameRoomService
-{
-    public GameRoom Room { get; }
-    public GameRoomService(EncryptedChannel channel, GameRules rules) => Room = new GameRoom(channel, rules);
 }

@@ -1,0 +1,115 @@
+classDiagram
+    class GameHub {
+        -RoomManager _rooms
+        -AccountStore _accounts
+        -CryptoSessionStore _sessions
+        -EncryptedChannel _channel
+        +Handshake(helloJson) string
+        +Confirm(clientProof) bool
+        +Call(envelope) string
+        -DispatchAsync(req) RpcReply
+        -HandleJoinAsync(payload) RpcReply
+        -HandleRoomList() RpcReply
+        -HandleCreateRoomAsync(payload) RpcReply
+        -HandleJoinRoomAsync(payload) RpcReply
+        -HandleLeaveRoomAsync() RpcReply
+        +OnDisconnectedAsync(ex) Task
+    }
+    class RoomManager {
+        -ConcurrentDictionary~string,GameRoom~ _rooms
+        -ConcurrentDictionary~string,string~ _connRoom
+        -ConcurrentDictionary~string,string~ _connUser
+        -EncryptedChannel _channel
+        -GameRules _rules
+        -RoomOptions _options
+        +List() List~RoomInfoDto~
+        +Find(roomId) GameRoom
+        +CreateRoom(connId,name,password) tuple
+        +JoinRoom(roomId,connId,password) tuple
+        +LeaveByConnection(connId) tuple
+        +BindIdentity(connId,username) void
+        +GetUsername(connId) string
+        +GetRoomByConnection(connId) GameRoom
+        +RecycleExpired() int
+    }
+    class RoomRecycleService {
+        -RoomManager _manager
+        +ExecuteAsync(stoppingToken) Task
+    }
+    class GameRoom {
+        +string Id
+        +string Name
+        +bool HasPassword
+        +string HostUsername
+        +int ConnectedCount
+        +int PlayerCount
+        +DateTime CreatedAt
+        +DateTime? EmptySince
+        -string _passwordHash
+        -List~Player~ _players
+        -object _sync
+        +AddOrReconnect(username,connId) tuple
+        +OnDisconnected(connId) void
+        +VerifyPassword(password) bool
+        +GetPlayerByName(username) Player
+        +StartGame(connId) tuple
+        +SubmitNightAction/SubmitVote/SubmitHunterShot()
+        +BroadcastAsync()/BroadcastStateAsync()
+        +ToInfo() RoomInfoDto
+        +TouchOccupancy() void
+    }
+    class RoomId {
+        <<static>>
+        +Generate(exists) string
+    }
+    class RoomPassword {
+        <<static>>
+        +Hash(roomId,password) string
+        +Verify(roomId,password,hash) bool
+    }
+    class EncryptedChannel {
+        +SendMessageAsync(connId,text) Task
+        +SendStateAsync(connId,dto) Task
+    }
+    class CryptoSessionStore {
+        +Get/Set/Remove(connId)
+    }
+    class GameClient {
+        +ConnectAndLoginAsync(url,user,pw) LoginResult
+        +LoginAsync(user,pw) JoinResult
+        +ListRoomsAsync() RoomListResult
+        +CreateRoomAsync(name,pw) RoomResult
+        +JoinRoomAsync(roomId,pw) RoomResult
+        +LeaveRoomAsync() JoinResult
+        +IsLoggedIn bool
+        +IsJoined bool
+        +CurrentRoomId string
+    }
+    class GameStateDto {
+        +string Phase
+        +string RoomId
+        +string RoomName
+        +string HostName
+        +List~PlayerDto~ Players
+    }
+    class RoomInfoDto {
+        +string Id
+        +string Name
+        +int PlayerCount
+        +int MaxPlayers
+        +string Status
+        +bool HasPassword
+        +string Host
+    }
+    GameHub --> RoomManager
+    GameHub --> CryptoSessionStore
+    RoomManager "1" o-- "0..*" GameRoom : _rooms
+    RoomManager --> EncryptedChannel
+    RoomManager ..> RoomId
+    RoomManager ..> RoomPassword
+    RoomRecycleService --> RoomManager
+    GameRoom --> EncryptedChannel
+    GameRoom --> Player
+    GameRoom ..> RoomInfoDto
+    GameClient ..> GameStateDto
+    GameClient ..> RoomInfoDto

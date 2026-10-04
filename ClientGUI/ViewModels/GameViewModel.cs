@@ -48,6 +48,9 @@ public sealed class GameViewModel : ObservableObject
     // ---------- 界面状态 ----------
     private string _connectionStatus = "未连接";
     private string _logStatus = "";
+    private string _roomId = "";
+    private string _roomName = "";
+    private string _hostName = "";
     private bool _isJoined;
     private bool _isConnected;
     private bool _isReconnecting;
@@ -103,9 +106,12 @@ public sealed class GameViewModel : ObservableObject
         _client.ConnectionClosed += ex => OnUi(() => OnConnectionClosed(ex));
         _client.Reconnected += info => OnUi(() => OnReconnected(info));
 
-        // 进入主窗口时已经登录成功（登录窗口负责连接与加入）。
+        // 进入主窗口时已经登录并成功加入房间（登录/房间列表负责连接与加入）。
         IsConnected = _client.IsConnected;
         IsJoined = _client.IsJoined;
+        _roomId = _client.CurrentRoomId;
+        _roomName = _client.CurrentRoomName;
+        _hostName = _client.CurrentHostName;
         ConnectionStatus = _client.IsJoined ? "已加入房间"
             : _client.IsConnected ? "已连接服务器"
             : "未连接";
@@ -140,8 +146,8 @@ public sealed class GameViewModel : ObservableObject
     /// <summary>房主开始游戏：左栏按钮与操作面板里的“开始游戏”共用同一个命令。</summary>
     public ICommand StartGameCommand => _commands.StartGame;
 
-    /// <summary>主动断开（退出房间）后触发，界面据此回到登录窗口。</summary>
-    public event Action? SessionEnded;
+    /// <summary>退出房间（不拆连接）后触发，界面据此回到房间列表。</summary>
+    public event Action? RoomLeft;
 
     // ==================== 绑定属性 ====================
 
@@ -367,6 +373,58 @@ public sealed class GameViewModel : ObservableObject
     public string EndpointText => IsJoined ? $"服务器：{_client.Endpoint}" : "";
     public string MeText => IsJoined ? $"[{YourId}] {_client.Username}" : "";
 
+    // ==================== 房间信息 ====================
+
+    /// <summary>当前房间号（来自状态推送）。</summary>
+    public string RoomId
+    {
+        get => _roomId;
+        private set
+        {
+            if (!Set(ref _roomId, value)) return;
+            OnPropertyChanged(nameof(RoomHeaderText));
+            OnPropertyChanged(nameof(HasRoomInfo));
+        }
+    }
+
+    /// <summary>当前房间名。</summary>
+    public string RoomName
+    {
+        get => _roomName;
+        private set
+        {
+            if (!Set(ref _roomName, value)) return;
+            OnPropertyChanged(nameof(RoomHeaderText));
+        }
+    }
+
+    /// <summary>当前房主用户名。</summary>
+    public string HostName
+    {
+        get => _hostName;
+        private set
+        {
+            if (!Set(ref _hostName, value)) return;
+            OnPropertyChanged(nameof(RoomHeaderText));
+        }
+    }
+
+    /// <summary>标题条展示的「房间号 · 房间名 · 房主」。</summary>
+    public string RoomHeaderText
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(RoomId)) return "";
+            var parts = new List<string> { $"房间 {RoomId}" };
+            if (!string.IsNullOrEmpty(RoomName)) parts.Add(RoomName);
+            if (!string.IsNullOrEmpty(HostName)) parts.Add($"房主：{HostName}");
+            return string.Join(" · ", parts);
+        }
+    }
+
+    /// <summary>是否有房间信息可展示。</summary>
+    public bool HasRoomInfo => !string.IsNullOrEmpty(RoomId);
+
     /// <summary>状态栏右下角的版本标识（与「关于」窗口同源）。</summary>
     public string VersionText => $"客户端 GUI · v{AppInfo.Version}";
 
@@ -377,11 +435,25 @@ public sealed class GameViewModel : ObservableObject
         _heartbeat.Stop();
         _countdown.Stop();
 
-        await _client.DisconnectAsync();
+        // 只离开房间，不拆连接（连接由房间列表窗口继续复用）。
+        try
+        {
+            var res = await _client.LeaveRoomAsync();
+            if (!res.ok)
+            {
+                AddLog("⚠️ 退出房间失败：" + res.msg, LogKinds.Error);
+                _heartbeat.Start();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog("⚠️ 退出房间失败：" + ex.Message, LogKinds.Error);
+            _heartbeat.Start();
+            return;
+        }
 
         IsJoined = false;
-        IsConnected = false;
-        IsReconnecting = false;
         LatencyMs = -1;
         _state = null;
         _rules = null;
@@ -401,12 +473,16 @@ public sealed class GameViewModel : ObservableObject
         Phase = Phases.Waiting;
         IsAlive = true;
         IsHost = false;
+        RoomId = "";
+        RoomName = "";
+        HostName = "";
 
-        ConnectionStatus = "未连接";
-        LogStatus = "已断开连接。";
-        AddLog("🔌 已断开与服务器的连接。");
+        IsConnected = _client.IsConnected;
+        ConnectionStatus = "已离开房间";
+        LogStatus = "已退出房间。";
+        AddLog("🚪 已退出房间，返回房间列表。");
 
-        SessionEnded?.Invoke();
+        RoomLeft?.Invoke();
     }
 
     // ==================== 房主开始 ====================
@@ -541,6 +617,11 @@ public sealed class GameViewModel : ObservableObject
         IsAlive = s.IsAlive;
         IsHost = s.Players.FirstOrDefault(p => p.IsYou)?.IsHost ?? false;
         ActingRole = s.ActingRole;
+
+        // 房间信息随状态下发（旧服务端可能为空，保留原有值）。
+        if (!string.IsNullOrEmpty(s.RoomId)) RoomId = s.RoomId;
+        RoomName = s.RoomName;
+        HostName = s.HostName;
 
         RefreshPlayers();
         RefreshActions();

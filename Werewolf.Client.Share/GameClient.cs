@@ -8,8 +8,8 @@ using Werewolf.Client.Share.Crypto;
 
 namespace Werewolf.Client.Share;
 
-/// <summary>登录（连接 + 加入房间）的结果。</summary>
-/// <param name="Ok">是否成功进入房间。</param>
+/// <summary>登录（连接 + 账号校验）的结果。</summary>
+/// <param name="Ok">是否成功登录。</param>
 /// <param name="Message">给用户看的结果说明。</param>
 /// <param name="Reconnected">是否恢复了已有房间身份（断线重连）。</param>
 public readonly record struct LoginResult(bool Ok, string Message, bool Reconnected)
@@ -17,8 +17,15 @@ public readonly record struct LoginResult(bool Ok, string Message, bool Reconnec
     public static LoginResult Fail(string message) => new(false, message, false);
 
     public static LoginResult Success(bool reconnected)
-        => new(true, reconnected ? "已恢复房间身份。" : "已加入房间。", reconnected);
+        => new(true, reconnected ? "已恢复房间身份。" : "登录成功。", reconnected);
 }
+
+/// <summary>创建 / 加入房间的返回。</summary>
+/// <param name="Ok">是否成功。</param>
+/// <param name="Message">服务端返回的提示（成功为 "created"/"joined"/"reconnected"）。</param>
+/// <param name="RoomId">所在房间号；失败时为空。</param>
+/// <param name="Reconnected">是否为恢复已有房间身份。</param>
+public readonly record struct RoomResult(bool Ok, string Message, string RoomId, bool Reconnected);
 
 /// <summary>
 /// 对 SignalR <see cref="HubConnection"/> 的封装，承载**整个网络收发逻辑**：
@@ -28,6 +35,7 @@ public readonly record struct LoginResult(bool Ok, string Message, bool Reconnec
 ///   <item>之后所有请求/响应/服务器推送都在应用层用该密钥 AES-GCM 加解密（不再依赖 TLS）。</item>
 /// </list>
 /// 传输仍走 SignalR（负责重连与心跳），但信道内容是加密信封，明文不可读。
+/// 多房间改造后：登录（账号校验）与进房分离，客户端可浏览 / 创建 / 加入多个房间；重连会自动恢复原房间。
 /// </summary>
 public sealed class GameClient : IAsyncDisposable
 {
@@ -46,10 +54,26 @@ public sealed class GameClient : IAsyncDisposable
     /// <summary>握手后建立的会话加密器；未握手时为 null。</summary>
     private SessionCipher? _cipher;
 
+    // ---------------- 身份 / 房间记忆（均为内存态，不落盘） ----------------
+
     /// <summary>用于断线自动重连后恢复身份。</summary>
     private string _username = "";
     private string _password = "";
+
+    /// <summary>账号是否已校验通过。</summary>
+    private bool _loggedIn;
+
+    /// <summary>当前是否在某个房间内。</summary>
     private bool _joined;
+
+    /// <summary>当前房间号（用于重连时恢复房间）；离开房间时清空。</summary>
+    private string _roomId = "";
+
+    /// <summary>当前房间密码（内存态，仅用于重连恢复）；离开房间时清空。</summary>
+    private string? _roomPassword;
+
+    private string _roomName = "";
+    private string _hostName = "";
     private bool _reconnecting;
 
     /// <summary>当前服务器地址（连接成功后填充）。</summary>
@@ -60,7 +84,10 @@ public sealed class GameClient : IAsyncDisposable
     /// <summary>是否正处于自动重连过程中。</summary>
     public bool IsReconnecting => _reconnecting;
 
-    /// <summary>已成功加入房间（已通过 Join 校验）。</summary>
+    /// <summary>账号已校验通过。</summary>
+    public bool IsLoggedIn => _loggedIn;
+
+    /// <summary>是否已在某房间内（语义=「已在房间」，沿用旧名，GUI 直接复用）。</summary>
     public bool IsJoined => _joined;
 
     /// <summary>会话密钥是否已协商完成（加密通道是否就绪）。</summary>
@@ -74,6 +101,15 @@ public sealed class GameClient : IAsyncDisposable
 
     public string Username => _username;
 
+    /// <summary>当前所在房间号；不在房间时为空字符串。</summary>
+    public string CurrentRoomId => _roomId;
+
+    /// <summary>当前房间名；不在房间时为空字符串。</summary>
+    public string CurrentRoomName => _roomName;
+
+    /// <summary>当前房主用户名；未知时为空字符串。</summary>
+    public string CurrentHostName => _hostName;
+
     // ---------------- 事件（均在后台线程触发，订阅方需自行调度到 UI 线程） ----------------
 
     public event Action<string>? MessageReceived;
@@ -82,6 +118,9 @@ public sealed class GameClient : IAsyncDisposable
     public event Action<Exception?>? ConnectionClosed;
     public event Action<string>? Reconnected;
 
+    /// <summary>收到房间列表（便于推送式刷新；本轮以拉取为主）。</summary>
+    public event Action<RoomListResult>? RoomListReceived;
+
     // ---------------- 连接 ----------------
 
     public async Task ConnectAsync(string url, CancellationToken ct = default)
@@ -89,6 +128,7 @@ public sealed class GameClient : IAsyncDisposable
         await DisposeConnectionAsync();
 
         Endpoint = url;
+        _loggedIn = false;
         _joined = false;
         _cipher = null;
         _reconnecting = false;
@@ -110,6 +150,7 @@ public sealed class GameClient : IAsyncDisposable
         _conn.Reconnecting += ex =>
         {
             _reconnecting = true;
+            _loggedIn = false;
             _joined = false;
             _cipher = null;
             LastLatencyMs = -1;
@@ -124,21 +165,29 @@ public sealed class GameClient : IAsyncDisposable
             try
             {
                 // 自动重连会得到新的 ConnectionId，服务端会话也已失效：
-                // 必须重新握手（含身份认证），再用同样的账号 Join 才能恢复房间身份。
+                // 必须重新握手（含身份认证），再用同样的账号登录，最后恢复房间身份。
                 await HandshakeAsync();
 
-                if (!string.IsNullOrEmpty(_username))
+                if (string.IsNullOrEmpty(_username)) return;
+
+                var login = await LoginAsync(_username, _password);   // ① 账号校验
+                if (!login.ok) { StatusChanged?.Invoke("恢复身份失败：" + login.msg); return; }
+
+                if (string.IsNullOrEmpty(_roomId))                    // ② 当时不在房间 → 仅恢复登录
                 {
-                    var res = await JoinAsync(_username, _password);
-                    if (res.ok)
-                    {
-                        _joined = true;
-                        Reconnected?.Invoke(res.msg == "reconnected"
-                            ? "身份已恢复，继续游戏。"
-                            : "已重新加入房间。");
-                        return;
-                    }
-                    StatusChanged?.Invoke("恢复身份失败：" + res.msg);
+                    Reconnected?.Invoke("已重新登录。");
+                    return;
+                }
+
+                var rr = await JoinRoomAsync(_roomId, _roomPassword); // ③ 恢复房间（内存中的房间号+密码）
+                if (rr.Ok)
+                {
+                    _joined = true;
+                    Reconnected?.Invoke(rr.Reconnected ? "身份已恢复，继续游戏。" : "已重新加入房间。");
+                }
+                else
+                {
+                    StatusChanged?.Invoke("恢复房间失败：" + rr.Message);
                 }
             }
             catch (Exception ex)
@@ -150,6 +199,7 @@ public sealed class GameClient : IAsyncDisposable
         _conn.Closed += ex =>
         {
             _reconnecting = false;
+            _loggedIn = false;
             _joined = false;
             _cipher = null;
             LastLatencyMs = -1;
@@ -166,6 +216,8 @@ public sealed class GameClient : IAsyncDisposable
     {
         await DisposeConnectionAsync();
         _cipher = null;
+        _loggedIn = false;
+        _joined = false;
         IsManuallyClosed = true;
         StatusChanged?.Invoke("已断开连接");
     }
@@ -173,13 +225,13 @@ public sealed class GameClient : IAsyncDisposable
     /// <summary>是否为“用户主动断开/退出房间”，用于区分掉线。</summary>
     public bool IsManuallyClosed { get; private set; }
 
-    // ---------------- 登录（连接 + 加入房间） ----------------
+    // ---------------- 登录（连接 + 账号校验） ----------------
 
     /// <summary>
-    /// 一次完成“连接服务器 → 认证握手 → 登录/注册 → 加入房间”，并做与服务器一致的参数校验。
-    /// 校验规则放在这里，界面层只负责显示 <see cref="LoginResult.Message"/>。
+    /// 一次完成“连接服务器 → 认证握手 → 登录/注册”，并做与服务器一致的参数校验。
+    /// 不再隐式进房；登录成功后由界面进入房间列表。校验规则放在这里，界面层只负责显示 <see cref="LoginResult.Message"/>。
     /// </summary>
-    public async Task<LoginResult> ConnectAndJoinAsync(string url, string username, string password)
+    public async Task<LoginResult> ConnectAndLoginAsync(string url, string username, string password)
     {
         url = (url ?? "").Trim();
         username = (username ?? "").Trim();
@@ -191,20 +243,21 @@ public sealed class GameClient : IAsyncDisposable
 
         await ConnectAsync(url);
 
-        var res = await JoinAsync(username, password);
+        var res = await LoginAsync(username, password);
         if (!res.ok)
         {
             // 登录失败不留半连接，直接断开，方便用户改完账号重新登录。
             await DisconnectAsync();
-            return LoginResult.Fail("加入失败：" + res.msg);
+            return LoginResult.Fail("登录失败：" + res.msg);
         }
 
-        return LoginResult.Success(res.msg == "reconnected");
+        return LoginResult.Success(false);
     }
 
-    // ---------------- 服务器方法 ----------------
+    // ---------------- 服务器方法：账号 ----------------
 
-    public async Task<JoinResult> JoinAsync(string username, string password)
+    /// <summary>账号校验（已注册即校验密码；首次即注册）。</summary>
+    public async Task<JoinResult> LoginAsync(string username, string password)
     {
         var reply = await CallAsync(Ops.Join, Node(new JoinPayload
         {
@@ -217,10 +270,90 @@ public sealed class GameClient : IAsyncDisposable
         {
             _username = username;
             _password = password;
-            _joined = true;
+            _loggedIn = true;
         }
         return res;
     }
+
+    // ---------------- 服务器方法：房间 ----------------
+
+    /// <summary>查询房间列表（只读）。</summary>
+    public async Task<RoomListResult> ListRoomsAsync()
+    {
+        var reply = await CallAsync(Ops.RoomList);
+        if (!reply.Ok) return new RoomListResult { Ok = false, Msg = reply.Msg, Rooms = new() };
+
+        var result = reply.Payload?.Deserialize<RoomListResult>(JsonOptions)
+                     ?? new RoomListResult { Ok = false, Msg = "无法解析房间列表。" };
+        if (result.Ok) RoomListReceived?.Invoke(result);
+        return result;
+    }
+
+    /// <summary>创建房间并成为房主；密码为空/null 即公开房间。</summary>
+    public async Task<RoomResult> CreateRoomAsync(string name, string? password)
+    {
+        var reply = await CallAsync(Ops.CreateRoom, Node(new CreateRoomPayload
+        {
+            Name = name ?? "",
+            Password = password
+        }));
+
+        var result = ApplyRoomReply(reply);
+        if (result.Ok) _roomPassword = password;
+        return result;
+    }
+
+    /// <summary>按房间号加入；加密房间需正确密码。</summary>
+    public async Task<RoomResult> JoinRoomAsync(string roomId, string? password)
+    {
+        var reply = await CallAsync(Ops.JoinRoom, Node(new JoinRoomPayload
+        {
+            RoomId = roomId ?? "",
+            Password = password
+        }));
+
+        var result = ApplyRoomReply(reply);
+        if (result.Ok) _roomPassword = password;
+        return result;
+    }
+
+    /// <summary>离开当前房间（不拆连接）；成功后清空内存中的房间号与密码。</summary>
+    public async Task<JoinResult> LeaveRoomAsync()
+    {
+        var reply = await CallAsync(Ops.LeaveRoom);
+        var res = new JoinResult { ok = reply.Ok, msg = reply.Msg };
+        if (res.ok)
+        {
+            _joined = false;
+            _roomId = "";
+            _roomPassword = null;
+            _roomName = "";
+            _hostName = "";
+        }
+        return res;
+    }
+
+    /// <summary>把创建 / 加入房间的响应落到本地状态。</summary>
+    private RoomResult ApplyRoomReply(RpcReply reply)
+    {
+        if (!reply.Ok) return new RoomResult(false, reply.Msg, "", false);
+
+        var payload = reply.Payload?.Deserialize<RoomActionResult>(JsonOptions);
+        var roomId = payload?.RoomId ?? "";
+        var reconnected = payload?.Reconnected ?? false;
+
+        if (roomId.Length > 0)
+        {
+            _roomId = roomId;
+            _roomName = payload?.Room?.Name ?? "";
+            _hostName = payload?.Room?.Host ?? "";
+            _joined = true;
+        }
+
+        return new RoomResult(true, reply.Msg, roomId, reconnected);
+    }
+
+    // ---------------- 服务器方法：游戏 ----------------
 
     public async Task<JoinResult> StartGameAsync()
     {
@@ -333,7 +466,11 @@ public sealed class GameClient : IAsyncDisposable
             {
                 case PushTypes.State:
                     var state = push.Payload?.Deserialize<GameStateDto>(JsonOptions);
-                    if (state != null) StateReceived?.Invoke(state);
+                    if (state != null)
+                    {
+                        SyncRoomFromState(state);
+                        StateReceived?.Invoke(state);
+                    }
                     break;
 
                 case PushTypes.Message:
@@ -346,6 +483,14 @@ public sealed class GameClient : IAsyncDisposable
         {
             MessageReceived?.Invoke("⚠️ 无法解密服务器消息：" + ex.Message);
         }
+    }
+
+    /// <summary>用状态推送里的房间信息同步本地记忆（房间号为空时不覆盖，兼容旧服务端）。</summary>
+    private void SyncRoomFromState(GameStateDto state)
+    {
+        if (!string.IsNullOrEmpty(state.RoomId)) _roomId = state.RoomId;
+        _roomName = state.RoomName ?? "";
+        _hostName = state.HostName ?? "";
     }
 
     /// <summary>把负载对象序列化成 JSON 节点（静态类型保证字段被完整序列化）。</summary>

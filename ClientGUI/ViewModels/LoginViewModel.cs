@@ -4,9 +4,9 @@ using Werewolf.Client.Share;
 namespace ClientGUI.ViewModels;
 
 /// <summary>
-/// 登录窗口的视图模型：只负责“地址 + 账号 → 登录成功”，
-/// 校验与网络细节都在 <see cref="GameClient.ConnectAndJoinAsync"/> 里。
-/// 登录成功后把同一个 <see cref="GameClient"/> 交给主窗口复用。
+/// 登录窗口的视图模型：只负责“地址 + 账号 → 登录成功（账号校验）”；
+/// 校验与网络细节都在 <see cref="GameClient.ConnectAndLoginAsync"/> 里。
+/// 登录成功后把同一个 <see cref="GameClient"/> 交给房间列表窗口复用。
 /// </summary>
 public sealed class LoginViewModel : ObservableObject
 {
@@ -21,7 +21,7 @@ public sealed class LoginViewModel : ObservableObject
     private string _serverUrl = DefaultServerUrl;
     private string _username = "";
     private string _password = "";
-    private string _status = "填写服务器地址与账号后登录；首次登录即注册。";
+    private string _status = "填写服务器地址与账号后登录；登录后进入房间列表。";
     private bool _isBusy;
     private bool _isLoggedIn;
     private bool _loginFailed;
@@ -47,12 +47,12 @@ public sealed class LoginViewModel : ObservableObject
         _ui.Post(_ => action(), null);
     }
 
-    /// <summary>登录成功后复用的会话（连接已建立、身份已加入房间）。</summary>
+    /// <summary>登录成功后复用的会话（连接已建立、账号已校验）。</summary>
     public GameClient Session => _client;
 
     public AsyncRelayCommand LoginCommand { get; }
 
-    /// <summary>登录成功并进入房间后触发。</summary>
+    /// <summary>登录成功后触发，把会话交给房间列表窗口。</summary>
     public event Action<GameClient>? LoginSucceeded;
 
     public string ServerUrl { get => _serverUrl; set => Set(ref _serverUrl, value); }
@@ -86,7 +86,7 @@ public sealed class LoginViewModel : ObservableObject
         Status = "正在连接服务器…";
         try
         {
-            var result = await _client.ConnectAndJoinAsync(ServerUrl, UsernameInput, PasswordInput);
+            var result = await _client.ConnectAndLoginAsync(ServerUrl, UsernameInput, PasswordInput);
             if (!result.Ok)
             {
                 // 失败原因可能来自本地校验、服务器拒绝或连接异常，统一显示。

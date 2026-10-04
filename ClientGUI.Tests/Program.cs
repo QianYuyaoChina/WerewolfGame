@@ -47,6 +47,24 @@ if (Array.IndexOf(args, "--ui") >= 0)
     return Check.FailureList.Count == 0 ? 0 : 1;
 }
 
+// 多房间端到端探针：--rooms <url>
+var roomsIndex = Array.IndexOf(args, "--rooms");
+if (roomsIndex >= 0 && roomsIndex + 1 < args.Length)
+{
+    var url = args[roomsIndex + 1];
+    Console.WriteLine($"════════ 多房间端到端探针（{url}） ════════");
+    return await MultiRoomProbe.RunAsync(url);
+}
+
+// 房间生命周期探针：--lifecycle <url>
+var lifecycleIndex = Array.IndexOf(args, "--lifecycle");
+if (lifecycleIndex >= 0 && lifecycleIndex + 1 < args.Length)
+{
+    var url = args[lifecycleIndex + 1];
+    Console.WriteLine($"════════ 房间生命周期探针（{url}） ════════");
+    return await LifecycleProbe.RunAsync(url);
+}
+
 // 断线重连探针：--reconnect <url> [秒]
 var reconnectIndex = Array.IndexOf(args, "--reconnect");
 if (reconnectIndex >= 0)
@@ -83,6 +101,9 @@ CryptoTests.RunAll();
 
 Console.WriteLine("════════ 规则与界面状态校验 ════════");
 GameRulesTests.RunAll();
+
+Console.WriteLine("════════ 多房间纯逻辑校验 ════════");
+RoomTests.RunAll();
 
 Console.WriteLine();
 if (Check.FailureList.Count == 0)

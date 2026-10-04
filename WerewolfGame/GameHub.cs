@@ -15,21 +15,22 @@ namespace Werewolf.Server;
 ///   <item><c>Confirm</c>：校验客户端身份证明，通过后会话才生效；</item>
 ///   <item><c>Call</c>：唯一加密入口，解密请求 → 分发 → 加密响应。</item>
 /// </list>
-/// 具体业务逻辑仍由 <see cref="GameRoom"/> 承担，Hub 只做协议与分发。
+/// 多房间改造后：<c>join</c> 收敛为「账号校验」；房间操作走 <c>roomlist/createroom/joinroom/leaveroom</c>；
+/// <c>start/night/vote/hunter/chat</c> 先按连接解析房间再分发。具体业务逻辑仍由 <see cref="GameRoom"/> 承担。
 /// </summary>
 public class GameHub : Hub
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
-    private readonly GameRoomService _service;
+    private readonly RoomManager _rooms;
     private readonly AccountStore _accounts;
     private readonly CryptoSessionStore _sessions;
     private readonly EncryptedChannel _channel;
 
-    public GameHub(GameRoomService service, AccountStore accounts,
+    public GameHub(RoomManager rooms, AccountStore accounts,
                    CryptoSessionStore sessions, EncryptedChannel channel)
     {
-        _service = service;
+        _rooms = rooms;
         _accounts = accounts;
         _sessions = sessions;
         _channel = channel;
@@ -127,7 +128,11 @@ public class GameHub : Hub
         {
             return request.Op switch
             {
-                Ops.Join => await HandleJoinAsync(request.Payload),
+                Ops.Join => HandleJoin(request.Payload),
+                Ops.RoomList => HandleRoomList(),
+                Ops.CreateRoom => await HandleCreateRoomAsync(request.Payload),
+                Ops.JoinRoom => await HandleJoinRoomAsync(request.Payload),
+                Ops.LeaveRoom => await HandleLeaveRoomAsync(),
                 Ops.Start => await HandleStartAsync(),
                 Ops.Night => HandleNight(request.Payload),
                 Ops.Vote => HandleVote(request.Payload),
@@ -143,9 +148,10 @@ public class GameHub : Hub
         }
     }
 
-    // ==================== 各操作的处理 ====================
+    // ==================== 账号 / 房间操作 ====================
 
-    private async Task<RpcReply> HandleJoinAsync(JsonNode? payload)
+    /// <summary>账号校验（首次即注册），成功后绑定「连接 → 用户名」。不再隐式进房。</summary>
+    private RpcReply HandleJoin(JsonNode? payload)
     {
         var join = payload?.Deserialize<JoinPayload>(Json) ?? new JoinPayload();
         var username = (join.Username ?? "").Trim();
@@ -166,57 +172,160 @@ public class GameHub : Hub
             return RpcReply.Error("密码错误");
         }
 
-        // ---- 加入 / 重连房间 ----
-        var room = _service.Room;
-        var (ok, msg, player, reconnected) = room.AddOrReconnect(username, Context.ConnectionId);
-        if (!ok || player == null) return RpcReply.Error(msg);
+        _rooms.BindIdentity(Context.ConnectionId, username);
+        return RpcReply.Success(ServerMessages.Ok);
+    }
 
-        if (reconnected)
+    /// <summary>房间列表（只读）：返回所有房间摘要。</summary>
+    private RpcReply HandleRoomList()
+    {
+        var result = new RoomListResult { Ok = true, Msg = "", Rooms = _rooms.List() };
+        return new RpcReply
         {
-            await SendTextToOthersAsync($"🔄 {username} 重新连接。");
-            if (room.IsRunning)
-                await room.ResendRoleAsync(player);   // 补发身份私聊
-        }
-        else
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(result, Json)
+        };
+    }
+
+    private async Task<RpcReply> HandleCreateRoomAsync(JsonNode? payload)
+    {
+        if (string.IsNullOrEmpty(_rooms.GetUsername(Context.ConnectionId)))
+            return RpcReply.Error(ServerMessages.NotLoggedIn);
+
+        var req = payload?.Deserialize<CreateRoomPayload>(Json) ?? new CreateRoomPayload();
+        var (ok, msg, roomId, _) = _rooms.CreateRoom(Context.ConnectionId, req.Name ?? "", req.Password);
+        if (!ok) return RpcReply.Error(msg);
+
+        var room = _rooms.Find(roomId);
+        if (room != null)
         {
-            await SendTextToOthersAsync($"👋 {username} 加入了房间。");
+            var username = _rooms.GetUsername(Context.ConnectionId);
+            await room.BroadcastAsync($"👋 {username} 创建了房间 {roomId}。");
+            await room.BroadcastStateAsync();
         }
 
-        await room.BroadcastStateAsync();
-        return RpcReply.Success(reconnected ? "reconnected" : "joined");
+        var result = new RoomActionResult
+        {
+            RoomId = roomId,
+            Reconnected = false,
+            Room = room?.ToInfo()
+        };
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "created",
+            Payload = JsonSerializer.SerializeToNode(result, Json)
+        };
+    }
+
+    private async Task<RpcReply> HandleJoinRoomAsync(JsonNode? payload)
+    {
+        if (string.IsNullOrEmpty(_rooms.GetUsername(Context.ConnectionId)))
+            return RpcReply.Error(ServerMessages.NotLoggedIn);
+
+        var req = payload?.Deserialize<JoinRoomPayload>(Json) ?? new JoinRoomPayload();
+        var roomId = (req.RoomId ?? "").Trim();
+        if (roomId.Length == 0) return RpcReply.Error(ServerMessages.RoomNotFound);
+
+        var (ok, msg, joinedRoomId, reconnected) = _rooms.JoinRoom(roomId, Context.ConnectionId, req.Password);
+        if (!ok) return RpcReply.Error(msg);
+
+        var room = _rooms.Find(joinedRoomId);
+        if (room != null)
+        {
+            var username = _rooms.GetUsername(Context.ConnectionId);
+            if (reconnected)
+            {
+                await room.BroadcastAsync($"🔄 {username} 重新连接。");
+                if (room.IsRunning)
+                {
+                    var player = room.GetPlayer(Context.ConnectionId);
+                    if (player != null) await room.ResendRoleAsync(player);   // 补发身份私聊
+                }
+            }
+            else
+            {
+                await room.BroadcastAsync($"👋 {username} 加入了房间。");
+            }
+            await room.BroadcastStateAsync();
+        }
+
+        var result = new RoomActionResult
+        {
+            RoomId = joinedRoomId,
+            Reconnected = reconnected,
+            Room = room?.ToInfo()
+        };
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = reconnected ? "reconnected" : "joined",
+            Payload = JsonSerializer.SerializeToNode(result, Json)
+        };
+    }
+
+    private async Task<RpcReply> HandleLeaveRoomAsync()
+    {
+        var (room, player) = _rooms.LeaveRoom(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
+        if (player != null)
+        {
+            bool removed = !room.IsRunning;
+            await room.BroadcastAsync(removed
+                ? $"❌ {player.Username} 离开了房间。"
+                : $"⚠️ {player.Username} 离开了房间（局内继续，可重新加入）。");
+            await room.BroadcastStateAsync();
+        }
+        return RpcReply.Success("left");
     }
 
     private async Task<RpcReply> HandleStartAsync()
     {
-        var (ok, msg) = _service.Room.StartGame(Context.ConnectionId);
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
+        var (ok, msg) = room.StartGame(Context.ConnectionId);
         if (!ok) await _channel.SendMessageAsync(Context.ConnectionId, "⚠️ " + msg);
         return ok ? RpcReply.Success() : RpcReply.Error(msg);
     }
 
     private RpcReply HandleNight(JsonNode? payload)
     {
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
         var act = payload?.Deserialize<NightPayload>(Json) ?? new NightPayload();
-        _service.Room.SubmitNightAction(Context.ConnectionId, act.TargetId, act.Action ?? "do");
+        room.SubmitNightAction(Context.ConnectionId, act.TargetId, act.Action ?? "do");
         return RpcReply.Success();
     }
 
     private RpcReply HandleVote(JsonNode? payload)
     {
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
         var act = payload?.Deserialize<TargetPayload>(Json) ?? new TargetPayload();
-        _service.Room.SubmitVote(Context.ConnectionId, act.TargetId);
+        room.SubmitVote(Context.ConnectionId, act.TargetId);
         return RpcReply.Success();
     }
 
     private RpcReply HandleHunter(JsonNode? payload)
     {
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
         var act = payload?.Deserialize<TargetPayload>(Json) ?? new TargetPayload();
-        _service.Room.SubmitHunterShot(Context.ConnectionId, act.TargetId);
+        room.SubmitHunterShot(Context.ConnectionId, act.TargetId);
         return RpcReply.Success();
     }
 
     private async Task<RpcReply> HandleChatAsync(JsonNode? payload)
     {
-        var room = _service.Room;
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
         var player = room.GetPlayer(Context.ConnectionId);
         if (player == null || !player.IsAlive) return RpcReply.Error("你已出局，无法发言。");
 
@@ -229,31 +338,24 @@ public class GameHub : Hub
 
     // ==================== 连接生命周期 ====================
 
+    /// <summary>
+    /// 断开清理顺序（见设计 §6）：
+    /// ① 移除会话密钥；② 脱离房间并清掉连接映射；③ 广播离开/掉线并刷新状态。
+    /// </summary>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var room = _service.Room;
-        var player = room.GetPlayer(Context.ConnectionId);
-        room.OnDisconnected(Context.ConnectionId);
         _sessions.Remove(Context.ConnectionId);
+        var (room, player) = _rooms.LeaveByConnection(Context.ConnectionId);
 
-        if (player != null)
+        if (room != null && player != null)
         {
             bool removed = !room.IsRunning;
             await room.BroadcastAsync(removed
                 ? $"❌ {player.Username} 离开了房间。"
                 : $"⚠️ {player.Username} 掉线了（可重新连接）。");
+            await room.BroadcastStateAsync();
         }
-        await room.BroadcastStateAsync();
-        await base.OnDisconnectedAsync(exception);
-    }
 
-    /// <summary>给房间内除自己以外的所有连接发文本（相当于原来的 <c>Clients.Others</c>）。</summary>
-    private async Task SendTextToOthersAsync(string text)
-    {
-        foreach (var player in _service.Room.ConnectedPlayers())
-        {
-            if (player.ConnectionId == Context.ConnectionId) continue;
-            await _channel.SendMessageAsync(player.ConnectionId, text);
-        }
+        await base.OnDisconnectedAsync(exception);
     }
 }

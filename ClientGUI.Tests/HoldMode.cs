@@ -13,6 +13,7 @@ public static class HoldMode
         Console.WriteLine($"保持 {names.Length} 个客户端在线 {seconds} 秒：{string.Join(", ", names)}");
         var clients = new List<GameClient>();
 
+        string? roomId = null;
         foreach (var name in names)
         {
             var c = new GameClient();
@@ -24,8 +25,26 @@ public static class HoldMode
             try
             {
                 await c.ConnectAsync(url);
-                var res = await c.JoinAsync(name, "pw" + name);
-                Console.WriteLine($"[{name}] join ok={res.ok} msg={res.msg}");
+
+                var login = await c.LoginAsync(name, "pw" + name);
+                if (!login.ok)
+                {
+                    Console.WriteLine($"[{name}] 登录失败：{login.msg}");
+                    continue;
+                }
+
+                if (roomId == null)
+                {
+                    var created = await c.CreateRoomAsync("联调房", null);
+                    roomId = created.Ok ? created.RoomId : null;
+                    Console.WriteLine($"[{name}] 创建房间 {roomId} ok={created.Ok}");
+                }
+                else
+                {
+                    var joined = await c.JoinRoomAsync(roomId, null);
+                    Console.WriteLine($"[{name}] 加入房间 {roomId} ok={joined.Ok} msg={joined.Message}");
+                }
+
                 clients.Add(c);
             }
             catch (Exception ex)

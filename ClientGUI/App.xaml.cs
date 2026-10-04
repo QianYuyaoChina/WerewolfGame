@@ -6,7 +6,7 @@ using Werewolf.Client.Share;
 namespace ClientGUI
 {
     /// <summary>
-    /// 应用程序入口：负责界面流程（登录窗口 → 主窗口 → 可回到登录窗口）
+    /// 应用程序入口：负责界面流程（登录 → 房间列表 → 主窗口 → 退出房间回房间列表）
     /// 与未处理异常的统一兜底，避免界面直接崩溃退出。
     /// </summary>
     public partial class App : Application
@@ -24,7 +24,7 @@ namespace ClientGUI
 
         // ==================== 界面流程 ====================
 
-        /// <summary>显示登录窗口；登录成功则进入主窗口，否则结束程序。</summary>
+        /// <summary>显示登录窗口；登录成功则进入房间列表，否则结束程序。</summary>
         private void ShowLogin()
         {
             var login = new LoginWindow();
@@ -32,23 +32,38 @@ namespace ClientGUI
 
             if (loggedIn && login.Session != null)
             {
-                ShowMain(login.Session);
+                RunRoomLoop(login.Session);
                 return;
             }
 
             Shutdown();
         }
 
-        /// <summary>用登录成功的会话打开主窗口；退出房间后回到登录窗口。</summary>
-        private void ShowMain(GameClient session)
+        /// <summary>
+        /// 房间列表 → 主窗口循环：退出房间回到房间列表（连接不拆）；
+        /// 关闭任一窗口则退出程序。退出程序前统一释放连接。
+        /// </summary>
+        private void RunRoomLoop(GameClient session)
         {
-            var main = new MainWindow(session);
-            main.Closed += (_, _) =>
+            try
             {
-                if (main.IsLoggedOut) ShowLogin();
-                else Shutdown();
-            };
-            main.Show();
+                while (true)
+                {
+                    var list = new RoomListWindow(session);
+                    if (list.ShowDialog() != true) break;   // 关闭房间列表 → 退出程序
+
+                    var main = new MainWindow(session);
+                    main.ShowDialog();
+                    if (!main.IsLoggedOut) break;           // 直接关窗 → 退出程序；否则回到房间列表
+                }
+            }
+            finally
+            {
+                try { session.DisposeAsync().AsTask().Wait(TimeSpan.FromMilliseconds(400)); }
+                catch { /* 忽略关闭异常 */ }
+            }
+
+            Shutdown();
         }
 
         // ==================== 异常兜底 ====================

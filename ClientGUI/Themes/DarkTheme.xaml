@@ -218,4 +218,172 @@
         </Setter>
     </Style>
 
+    <!-- ═══════════════ 菜单（深色） ═══════════════ -->
+
+    <!--
+        WPF 默认的 Menu/MenuItem 是浅色系统外观，与深色主题冲突，因此整份重写模板。
+        MenuItem 有四种 Role，用基于 Role 的 Style.Triggers 分发到不同模板：
+        菜单栏上的标题（TopLevelHeader）、下拉里的每一项（叶子模板）、
+        以及嵌套子菜单（SubmenuHeader）。
+        每个模板都在根 Border 上显式设置 TextElement.Foreground —— Popup 内是独立视觉树，
+        不能指望 Foreground 一定从 MenuItem 继承下来。
+    -->
+
+    <!-- 下拉菜单里的一行（叶子项） -->
+    <ControlTemplate x:Key="MenuLeafTemplate" TargetType="MenuItem">
+        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="10,7"
+                TextElement.Foreground="{TemplateBinding Foreground}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <!-- 固定宽度的勾选列：勾选时填入 ✔，保证未勾选项文字不左右跳动 -->
+                <TextBlock x:Name="Check" Grid.Column="0" Text="" FontSize="11"
+                           Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
+                <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True"
+                                  VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" FontSize="11"
+                           Foreground="{StaticResource MutedBrush}" Margin="20,0,0,0"
+                           VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Check" Property="Text" Value="✔" />
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource PanelAltBrush}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- 菜单栏上的标题（点击展开下拉） -->
+    <ControlTemplate x:Key="MenuTopLevelHeaderTemplate" TargetType="MenuItem">
+        <Grid>
+            <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="12,6"
+                    TextElement.Foreground="{TemplateBinding Foreground}">
+                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+            </Border>
+            <Popup x:Name="PART_Popup" Placement="Bottom" VerticalOffset="2"
+                   IsOpen="{TemplateBinding IsSubmenuOpen}" AllowsTransparency="True"
+                   Focusable="False" PopupAnimation="Fade">
+                <Border Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1"
+                        CornerRadius="6" Padding="4" MinWidth="196" SnapsToDevicePixels="True">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.5" Color="#FF000000" />
+                    </Border.Effect>
+                    <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+                </Border>
+            </Popup>
+        </Grid>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource PanelAltBrush}" />
+            </Trigger>
+            <Trigger Property="IsSubmenuOpen" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource PanelAltBrush}" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- 菜单栏上的独立项（无下拉） -->
+    <ControlTemplate x:Key="MenuTopLevelItemTemplate" TargetType="MenuItem">
+        <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="12,6"
+                TextElement.Foreground="{TemplateBinding Foreground}">
+            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource PanelAltBrush}" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- 嵌套子菜单标题（当前未使用，仍提供以保证 Role 分派完整） -->
+    <ControlTemplate x:Key="MenuSubmenuHeaderTemplate" TargetType="MenuItem">
+        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="10,7"
+                TextElement.Foreground="{TemplateBinding Foreground}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True"
+                                  VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="›" FontSize="13" Foreground="{StaticResource MutedBrush}"
+                           Margin="16,0,0,0" VerticalAlignment="Center" />
+                <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="2"
+                       IsOpen="{TemplateBinding IsSubmenuOpen}" AllowsTransparency="True"
+                       Focusable="False" PopupAnimation="Fade">
+                    <Border Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1"
+                            CornerRadius="6" Padding="4" MinWidth="180" SnapsToDevicePixels="True">
+                        <StackPanel IsItemsHost="True" />
+                    </Border>
+                </Popup>
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource PanelAltBrush}" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="FlatMenuItem" TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template" Value="{StaticResource MenuLeafTemplate}" />
+        <Style.Triggers>
+            <Trigger Property="Role" Value="TopLevelHeader">
+                <Setter Property="Template" Value="{StaticResource MenuTopLevelHeaderTemplate}" />
+            </Trigger>
+            <Trigger Property="Role" Value="TopLevelItem">
+                <Setter Property="Template" Value="{StaticResource MenuTopLevelItemTemplate}" />
+            </Trigger>
+            <Trigger Property="Role" Value="SubmenuHeader">
+                <Setter Property="Template" Value="{StaticResource MenuSubmenuHeaderTemplate}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="FlatMenu" TargetType="Menu">
+        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        <Setter Property="Padding" Value="6,2" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Menu">
+                    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                        <StackPanel Orientation="Horizontal" IsItemsHost="True" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Separator 不是 MenuItem，不会被 ItemContainerStyle 覆盖，需显式指定本样式。 -->
+    <Style x:Key="MenuSeparator" TargetType="Separator">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Margin" Value="8,4" />
+        <Setter Property="Background" Value="{StaticResource BorderBrush2}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Background="{TemplateBinding Background}" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

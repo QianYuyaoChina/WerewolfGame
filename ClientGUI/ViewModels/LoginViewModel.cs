@@ -1,4 +1,5 @@
 using ClientGUI.Services;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
 
@@ -28,6 +29,11 @@ public sealed class LoginViewModel : ObservableObject
     public LoginViewModel()
     {
         _ui = SynchronizationContext.Current;
+
+        // 回填上次填写的地址与用户名（不保存密码），省去每次重新输入。
+        var saved = UiStateStore.State;
+        if (!string.IsNullOrWhiteSpace(saved.ServerUrl)) _serverUrl = saved.ServerUrl;
+        _username = saved.Username;
 
         // 连接过程中的阶段提示（“已连接服务器”“正在重连…”），来自 SignalR 后台线程。
         _client.StatusChanged += status => OnUi(() => Status = status);
@@ -92,6 +98,12 @@ public sealed class LoginViewModel : ObservableObject
             ShowError = false;
             IsLoggedIn = true;
             Status = result.Message;
+
+            // 登录成功才记住地址与用户名。
+            UiStateStore.State.ServerUrl = ServerUrl;
+            UiStateStore.State.Username = UsernameInput;
+            UiStateStore.Save();
+
             LoginSucceeded?.Invoke(_client);
         }
         catch (Exception ex)

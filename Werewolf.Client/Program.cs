@@ -1,41 +1,12 @@
 ﻿using System.Text;
-using Microsoft.AspNetCore.SignalR.Client;
-
-// ---------------- DTO ----------------
-class PlayerDto
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = "";
-    public bool IsAlive { get; set; }
-    public bool IsHost { get; set; }
-    public bool IsYou { get; set; }
-    public bool IsConnected { get; set; }
-    public string? Role { get; set; }
-}
-
-class GameStateDto
-{
-    public string Phase { get; set; } = "";
-    public int Day { get; set; }
-    public int YourId { get; set; }
-    public string YourRole { get; set; } = "";
-    public string YourRoleDesc { get; set; } = "";
-    public bool IsAlive { get; set; }
-    public List<PlayerDto> Players { get; set; } = new();
-}
-
-class JoinResult
-{
-    public bool ok { get; set; }
-    public string msg { get; set; } = "";
-}
+using Werewolf.Client.Share;
 
 // ---------------- 主程序 ----------------
 class Program
 {
     static readonly object ConsoleLock = new();
     static GameStateDto? _state;
-    static HubConnection _conn = null!;
+    static GameClient _client = null!;
 
     static async Task Main()
     {
@@ -47,23 +18,20 @@ class Program
         string url = Console.ReadLine()?.Trim() ?? "";
         if (string.IsNullOrEmpty(url)) url = "http://localhost:5000/gamehub";
 
-        // ② 连接
-        _conn = new HubConnectionBuilder()
-            .WithUrl(url)
-            .WithAutomaticReconnect()
-            .Build();
-
-        _conn.On<string>("Message", m => Print(m));
-        _conn.On<GameStateDto>("State", s =>
+        // ② 连接：明文 HTTP 传输，连接后自动用快速幂 DH 协商会话密钥（应用层加密）
+        _client = new GameClient();
+        _client.MessageReceived += m => Print(m);
+        _client.StateReceived += s =>
         {
             _state = s;
             RenderState(s);
-        });
+        };
 
         try
         {
-            await _conn.StartAsync();
+            await _client.ConnectAsync(url);
             Print($"✅ 已连接服务器：{url}");
+            Print($"🔐 会话密钥已协商（指纹 {_client.SessionKeyFingerprint}），所有消息均已加密。");
         }
         catch (Exception ex)
         {
@@ -87,7 +55,7 @@ class Program
             JoinResult res;
             try
             {
-                res = await _conn.InvokeAsync<JoinResult>("Join", username, password);
+                res = await _client.JoinAsync(username, password);
             }
             catch (Exception ex)
             {
@@ -120,7 +88,7 @@ class Program
             catch (Exception ex) { Print("⚠️ " + ex.Message); }
         }
 
-        await _conn.DisposeAsync();
+        await _client.DisposeAsync();
     }
 
     static async Task HandleCommand(string line)
@@ -130,35 +98,35 @@ class Program
         if (line.Equals("help", StringComparison.OrdinalIgnoreCase)) { PrintHelp(); return; }
         if (line.Equals("start", StringComparison.OrdinalIgnoreCase))
         {
-            var r = await _conn.InvokeAsync<JoinResult>("Start");
+            var r = await _client.StartGameAsync();
             if (!r.ok) Print("⚠️ " + r.msg);
             return;
         }
         if (line.StartsWith("chat ", StringComparison.OrdinalIgnoreCase))
         {
-            await _conn.SendAsync("Chat", line[5..]);
+            await _client.ChatAsync(line[5..]);
             return;
         }
 
         // 女巫专属指令
-        if (s?.Phase == "Night" && s.YourRole == "女巫")
+        if (s?.Phase == Phases.Night && s.YourRole == Roles.Witch)
         {
             if (line.Equals("heal", StringComparison.OrdinalIgnoreCase))
             {
-                await _conn.SendAsync("NightAction", -2, "heal");
+                await _client.NightActionAsync(-2, "heal");
                 Print("✅ 已使用解药");
                 return;
             }
             if (line.Equals("none", StringComparison.OrdinalIgnoreCase))
             {
-                await _conn.SendAsync("NightAction", -1, "none");
+                await _client.NightActionAsync(-1, "none");
                 Print("✅ 今晚不使用药水");
                 return;
             }
             if (line.StartsWith("poison ", StringComparison.OrdinalIgnoreCase)
                 && int.TryParse(line[7..].Trim(), out int pid))
             {
-                await _conn.SendAsync("NightAction", pid, "poison");
+                await _client.NightActionAsync(pid, "poison");
                 Print($"✅ 已使用毒药 → [{pid}]");
                 return;
             }
@@ -169,16 +137,16 @@ class Program
         {
             switch (s?.Phase)
             {
-                case "Night":
-                    await _conn.SendAsync("NightAction", id, "do");
+                case Phases.Night:
+                    await _client.NightActionAsync(id, "do");
                     Print($"✅ 已选择 [{id}]");
                     return;
-                case "Vote":
-                    await _conn.SendAsync("Vote", id);
+                case Phases.Vote:
+                    await _client.VoteAsync(id);
                     Print(id < 0 ? "✅ 已弃票" : $"✅ 已投票 → [{id}]");
                     return;
-                case "HunterShoot":
-                    await _conn.SendAsync("HunterShot", id);
+                case Phases.HunterShoot:
+                    await _client.HunterShotAsync(id);
                     Print(id < 0 ? "✅ 放弃开枪" : $"✅ 开枪 → [{id}]");
                     return;
                 default:
@@ -202,7 +170,7 @@ class Program
         lock (ConsoleLock)
         {
             Console.WriteLine();
-            Console.WriteLine($"┌─────────── 第 {s.Day} 天 · {PhaseName(s.Phase)} ───────────");
+            Console.WriteLine($"┌─────────── 第 {s.Day} 天 · {Phases.DisplayName(s.Phase)} ───────────");
             var me = s.Players.FirstOrDefault(p => p.IsYou);
             Console.WriteLine($"│ 你：[{s.YourId}] {me?.Name}　身份：{s.YourRole}　{(s.IsAlive ? "存活" : "已出局")}");
             Console.WriteLine("│ 玩家列表：");
@@ -218,18 +186,6 @@ class Program
             Console.WriteLine("└──────────────────────────────────────");
         }
     }
-
-    static string PhaseName(string phase) => phase switch
-    {
-        "Waiting" => "等待开始",
-        "Night" => "🌙 夜晚",
-        "Day" => "☀️ 天亮",
-        "Discussion" => "💬 讨论",
-        "Vote" => "🗳 投票",
-        "HunterShoot" => "🔫 猎人开枪",
-        "GameOver" => "🏁 游戏结束",
-        _ => phase
-    };
 
     static void PrintHelp()
     {

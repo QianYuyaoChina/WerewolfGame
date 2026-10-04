@@ -1,4 +1,4 @@
-namespace ClientGUI.Models;
+namespace Werewolf.Client.Share;
 
 /// <summary>服务器阶段名（与 <c>GameStateDto.Phase</c> 字符串一致）。</summary>
 public static class Phases
@@ -23,7 +23,7 @@ public static class Phases
         _ => phase
     };
 
-    /// <summary>阶段横幅用的配色（十六进制字符串，画刷由 <c>UiBrushes</c> 缓存）。</summary>
+    /// <summary>阶段横幅用的配色（十六进制字符串，画刷由调用方缓存）。</summary>
     public static string Accent(string phase) => phase switch
     {
         Night => "#5B6CFF",
@@ -35,7 +35,10 @@ public static class Phases
         _ => "#7C8AA5"
     };
 
-    /// <summary>阶段的本地倒计时秒数（与服务器超时保持一致，仅用于提示）；0 表示不限时。</summary>
+    /// <summary>
+    /// 阶段的兜底倒计时秒数（服务端未下发 <see cref="GameRules"/> 时使用）；0 表示不限时。
+    /// 正常情况下应以服务端下发的规则为准（见 <see cref="GameRules.SecondsForPhase"/>）。
+    /// </summary>
     public static int CountdownSeconds(string phase) => phase switch
     {
         Night => 40,

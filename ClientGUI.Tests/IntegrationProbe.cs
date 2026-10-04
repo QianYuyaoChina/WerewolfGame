@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using ClientGUI.Models;
-using ClientGUI.Services;
+using Werewolf.Client.Share;
+using Werewolf.Client.Share.Crypto;
 
 namespace ClientGUI.Tests;
 
@@ -74,6 +74,19 @@ public static class IntegrationProbe
 
             if (ok) Pass("4 名玩家连接并加入房间");
 
+            // ---------- 1.5 快速幂密钥协商 + PSK 身份认证 ----------
+            if (clients.All(c => c.IsEncrypted))
+                Pass("4 个客户端均已用快速幂完成 DH 协商并通过 PSK 身份校验（会话已加密）");
+            else
+                Fail("存在未建立会话密钥的客户端");
+
+            var fingerprints = clients.Select(c => c.SessionKeyFingerprint).ToList();
+            if (fingerprints.All(f => f.Length > 0)
+                && fingerprints.Distinct(StringComparer.Ordinal).Count() == fingerprints.Count)
+                Pass("每个连接使用独立会话密钥（指纹互不相同）");
+            else
+                Fail("会话密钥指纹异常：" + string.Join(",", fingerprints));
+
             // ---------- 2. 等待房间状态推送 ----------
             // 注意：4 个客户端都收到过 State 并不代表它们都收到了「包含全部 4 人」的那一次广播，
             // 因此要等到所有人都看到 4 名玩家，避免断言提前于最后一次广播。
@@ -101,6 +114,23 @@ public static class IntegrationProbe
 
             if (waiting.Players.Count(p => p.IsYou) != 1) Fail("每份状态应恰好标记 1 个 IsYou");
             else Pass("IsYou 标记正确");
+
+            // ---------- 2.5 服务端下发的规则 ----------
+            var rules = waiting.Rules;
+            if (rules == null)
+            {
+                Fail("状态里没有下发游戏规则（Rules 为空）");
+            }
+            else if (rules.NightActionSeconds > 0 && rules.VoteSeconds > 0
+                     && rules.MinPlayers > 0 && rules.NightOrder.Contains("狼人"))
+            {
+                Pass($"状态携带服务端规则（夜晚 {rules.NightActionSeconds}s / 投票 {rules.VoteSeconds}s / " +
+                     $"最少 {rules.MinPlayers} 人 / 顺序 {string.Join("→", rules.NightOrder)}）");
+            }
+            else
+            {
+                Fail("规则字段与预期不符：" + JsonSerializer.Serialize(rules));
+            }
 
             // ---------- 3. 非房主不能开始 ----------
             var guest = clients[1];
@@ -137,27 +167,45 @@ public static class IntegrationProbe
             else
                 Fail("未按预期进入 Night 阶段：" + string.Join("/", Snap().Select(s => s.Phase).Distinct()));
 
-            // 女巫用解药、狼人选目标，尽快推进夜晚
-            foreach (var (name, client) in names.Zip(clients))
+            // 女巫用解药、狼人选目标，尽快推进夜晚。
+            // 服务端按规则配置的夜晚顺序串行等待（默认 守卫→狼人→女巫→预言家），
+            // 未轮到自己的提交会被忽略，因此这里按“服务端下发的顺序”逐个等待并提交。
+            var nightActors = Snap().FirstOrDefault(s => s.Rules != null)?.Rules?.NightOrder is { Count: > 0 } configured
+                ? configured.ToArray()
+                : new[] { Roles.Guard, Roles.Werewolf, Roles.Witch, Roles.Seer };
+            foreach (var actor in nightActors)
             {
-                var role = states[name].YourRole;
-                switch (role)
+                // 等服务器广播“当前轮到该角色”。
+                await WaitUntil(() =>
                 {
-                    case Roles.Werewolf:
-                        await client.NightActionAsync(1, "do");
-                        break;
-                    case Roles.Witch:
-                        await client.NightActionAsync(-2, "heal");
-                        break;
-                    case Roles.Seer:
-                        await client.NightActionAsync(2, "do");
-                        break;
-                    case Roles.Guard:
-                        await client.NightActionAsync(3, "do");
-                        break;
+                    lock (gate) return states.Values.Any(s => s.Phase == Phases.Night && s.ActingRole == actor);
+                }, 5000);
+
+                // 找到扮演该角色的存活客户端并提交。
+                foreach (var (name, client) in names.Zip(clients))
+                {
+                    var s = states[name];
+                    if (s.Phase != Phases.Night || s.ActingRole != actor || !s.IsAlive) continue;
+                    if (s.YourRole != actor) continue;
+
+                    switch (actor)
+                    {
+                        case Roles.Werewolf:
+                            await client.NightActionAsync(1, "do");
+                            break;
+                        case Roles.Witch:
+                            await client.NightActionAsync(-2, "heal");
+                            break;
+                        case Roles.Seer:
+                            await client.NightActionAsync(2, "do");
+                            break;
+                        case Roles.Guard:
+                            await client.NightActionAsync(3, "do");
+                            break;
+                    }
                 }
             }
-            Pass("夜间行动已提交（狼人/女巫/预言家/守卫按身份）");
+            Pass($"夜间行动已按服务端下发的顺序提交（{string.Join("/", nightActors)}）");
 
             // ---------- 6. 白天 → 讨论 → 投票 ----------
             await WaitUntil(() => Snap().Any(s => s.Phase == Phases.Vote), 60_000);
@@ -237,6 +285,51 @@ public static class IntegrationProbe
                 Pass("DTO 与服务器 JSON 形状匹配（含 null Role / 断线标记）");
             else
                 Fail("DTO 反序列化结果与预期不符");
+
+            // ---------- 9.5 心跳 ----------
+            try
+            {
+                var latency = await clients[0].PingAsync();
+                if (latency >= 0 && latency < 5000)
+                    Pass($"心跳往返正常（{latency} ms）");
+                else
+                    Fail("心跳时延异常：" + latency + " ms");
+            }
+            catch (Exception ex)
+            {
+                Fail("心跳失败：" + ex.Message);
+            }
+
+            // ---------- 10. 身份认证：错误的预共享密钥必须被拒绝 ----------
+            var originalPsk = Environment.GetEnvironmentVariable(PreSharedKey.EnvironmentVariable);
+            try
+            {
+                Environment.SetEnvironmentVariable(
+                    PreSharedKey.EnvironmentVariable, "definitely-not-the-server-psk");
+
+                var rogue = new GameClient();
+                try
+                {
+                    await rogue.ConnectAsync(url);
+                    Fail("错误的预共享密钥竟然握手成功（身份认证失效）");
+                }
+                catch (Exception ex) when (ex.Message.Contains("身份校验"))
+                {
+                    Pass("错误的预共享密钥被拒绝，身份认证生效：" + ex.Message);
+                }
+                catch (Exception ex)
+                {
+                    Fail("错误 PSK 的失败原因不符合预期：" + ex.Message);
+                }
+                finally
+                {
+                    try { await rogue.DisposeAsync(); } catch { }
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(PreSharedKey.EnvironmentVariable, originalPsk);
+            }
         }
         catch (Exception ex)
         {

@@ -21,6 +21,12 @@ public static class Check
         else Failures.Add($"{what}：期望 <{expected}>，实际 <{actual}>");
     }
 
+    public static void NotEqual<T>(T unexpected, T actual, string what)
+    {
+        if (!EqualityComparer<T>.Default.Equals(unexpected, actual)) _passed++;
+        else Failures.Add($"{what}：不应等于 <{unexpected}>");
+    }
+
     public static void SequenceEqual<T>(IEnumerable<T> expected, IEnumerable<T> actual, string what)
     {
         var e = expected.ToArray();

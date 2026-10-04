@@ -5,4 +5,8 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<RootNamespace>Werewolf.Server</RootNamespace>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Werewolf.Client.Share\Werewolf.Client.Share.csproj" />
+	</ItemGroup>
 </Project>

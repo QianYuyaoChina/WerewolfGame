@@ -6,6 +6,6 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.0" />
+		<ProjectReference Include="..\Werewolf.Client.Share\Werewolf.Client.Share.csproj" />
 	</ItemGroup>
 </Project>

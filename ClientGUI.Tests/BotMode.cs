@@ -1,5 +1,4 @@
-using ClientGUI.Models;
-using ClientGUI.Services;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.Tests;
 

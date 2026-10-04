@@ -1,5 +1,5 @@
 using System.Windows.Media;
-using ClientGUI.Models;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
 
@@ -11,6 +11,9 @@ public static class UiBrushes
 {
     public static Brush Alive { get; } = Frozen(Color.FromRgb(84, 214, 154));
     public static Brush Dead { get; } = Frozen(Color.FromRgb(230, 96, 96));
+
+    /// <summary>警示色（重连中 / 需要提醒的状态）。</summary>
+    public static Brush Warning { get; } = Frozen(Color.FromRgb(240, 190, 90));
 
     public static Brush RowBackgroundDead { get; } = Frozen(Color.FromArgb(20, 255, 255, 255));
     public static Brush RowBackgroundSelectable { get; } = Frozen(Color.FromArgb(28, 124, 196, 255));

@@ -47,6 +47,19 @@ if (Array.IndexOf(args, "--ui") >= 0)
     return Check.FailureList.Count == 0 ? 0 : 1;
 }
 
+// 断线重连探针：--reconnect <url> [秒]
+var reconnectIndex = Array.IndexOf(args, "--reconnect");
+if (reconnectIndex >= 0)
+{
+    var url = reconnectIndex + 1 < args.Length ? args[reconnectIndex + 1] : DefaultUrl;
+    var seconds = 60;
+    if (reconnectIndex + 2 < args.Length && int.TryParse(args[reconnectIndex + 2], out var parsed))
+        seconds = parsed;
+
+    Console.WriteLine($"════════ 断线重连探针（{url}） ════════");
+    return await ReconnectProbe.RunAsync(url, seconds);
+}
+
 // 端到端联调：--server <url>
 var serverIndex = Array.IndexOf(args, "--server");
 if (serverIndex >= 0 && serverIndex + 1 < args.Length)
@@ -64,6 +77,12 @@ if (serverIndex >= 0 && serverIndex + 1 < args.Length)
 // 默认：纯逻辑校验
 Console.WriteLine("════════ ClientGUI 逻辑校验 ════════");
 await ActionComputationTests.RunAllAsync();
+
+Console.WriteLine("════════ 加密算法校验 ════════");
+CryptoTests.RunAll();
+
+Console.WriteLine("════════ 规则与界面状态校验 ════════");
+GameRulesTests.RunAll();
 
 Console.WriteLine();
 if (Check.FailureList.Count == 0)

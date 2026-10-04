@@ -1,6 +1,6 @@
 using System.Reflection;
-using ClientGUI.Models;
 using ClientGUI.ViewModels;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.Tests;
 
@@ -29,7 +29,8 @@ public static class ActionComputationTests
         bool isAlive = true,
         int day = 1,
         int playerCount = 4,
-        int[]? dead = null)
+        int[]? dead = null,
+        string? actingRole = null)
     {
         var players = new List<PlayerDto>();
         for (var i = 0; i < playerCount; i++)
@@ -54,6 +55,7 @@ public static class ActionComputationTests
             YourRole = yourRole,
             YourRoleDesc = "desc",
             IsAlive = isAlive,
+            ActingRole = actingRole ?? "",
             Players = players
         };
     }
@@ -62,11 +64,45 @@ public static class ActionComputationTests
     {
         WaitingPhase();
         NightPhase();
+        NightTurnGating();
         VotePhase();
         HunterPhase();
         PassivePhases();
         StateConsistency();
+        RulesDrivenUi();
         await ConnectionFailureAsync();
+    }
+
+    // ==================== 规则驱动的界面（可配置化回归） ====================
+
+    /// <summary>
+    /// 倒计时与“最少人数”提示必须跟随服务端下发的规则；缺省时回退默认值（兼容旧服务端）。
+    /// </summary>
+    private static void RulesDrivenUi()
+    {
+        // 倒计时秒数来自服务端规则。
+        var vote = State(Phases.Vote, Roles.Villager, yourId: 0);
+        vote.Rules = new GameRules { VoteSeconds = 7 };
+        var voteVm = Apply(vote);
+        Check.True(voteVm.CountdownText.Contains("7"), "规则：倒计时采用服务端下发的投票秒数");
+
+        // 人数不足时房主不能开始，提示里的最少人数也来自规则。
+        var short3 = State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 3);
+        short3.Rules = new GameRules { MinPlayers = 6 };
+        var shortVm = Apply(short3);
+        Check.False(shortVm.CanStartGame, "规则：人数不足时房主不能开始");
+        Check.True(shortVm.Actions[0].Hint?.Contains("6") == true, "规则：开始提示采用服务端下发的最少人数");
+        Check.True(shortVm.StartHint.Contains("6"), "规则：等待提示采用服务端下发的最少人数");
+
+        // 人数达标后可开始。
+        var enough = State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 6);
+        enough.Rules = new GameRules { MinPlayers = 6 };
+        Check.True(Apply(enough).CanStartGame, "规则：人数达标后房主可开始");
+
+        // 未下发规则时回退默认（4 人）。
+        var legacy = State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 3);
+        Check.False(Apply(legacy).CanStartGame, "规则：缺省时按默认最少 4 人判定");
+        Check.True(Apply(legacy).Actions[0].Hint?.Contains("4") == true, "规则：缺省时提示默认最少人数");
     }
 
     // ==================== 连接失败 ====================
@@ -135,19 +171,19 @@ public static class ActionComputationTests
     {
         foreach (var role in new[] { Roles.Werewolf, Roles.Seer, Roles.Guard })
         {
-            var vm = Apply(State(Phases.Night, role, yourId: 1, playerCount: 5));
+            var vm = Apply(State(Phases.Night, role, yourId: 1, playerCount: 5, actingRole: role));
             Check.SequenceEqual(
                 new[] { 0, 2, 3, 4 },
                 vm.Players.Where(p => p.Selectable).Select(p => p.Id).OrderBy(i => i),
                 $"夜晚 {role}：可选目标为其他存活玩家");
         }
 
-        var villager = Apply(State(Phases.Night, Roles.Villager));
+        var villager = Apply(State(Phases.Night, Roles.Villager, actingRole: Roles.Guard));
         Check.Equal(0, villager.Actions.Count, "夜晚 平民：没有操作按钮");
-        Check.True(villager.ActionHint.Contains("平民"), "夜晚 平民：提示包含身份");
+        Check.True(villager.ActionHint.Contains("等待") || villager.ActionHint.Contains("平民"), "夜晚 平民：提示身份或等待");
         Check.False(villager.Players.Any(p => p.Selectable), "夜晚 平民：没有可选目标");
 
-        var witch = Apply(State(Phases.Night, Roles.Witch, yourId: 1, playerCount: 5));
+        var witch = Apply(State(Phases.Night, Roles.Witch, yourId: 1, playerCount: 5, actingRole: Roles.Witch));
         Check.Equal(3, witch.Actions.Count, "夜晚 女巫：3 个按钮");
         Check.True(witch.Actions.Any(a => a.Label.Contains("解药") && a.IsEnabled), "夜晚 女巫：解药可用");
         Check.True(witch.Actions.Any(a => a.Label.Contains("毒药") && a.IsEnabled), "夜晚 女巫：毒药可用");
@@ -158,7 +194,7 @@ public static class ActionComputationTests
             "夜晚 女巫：毒药目标为其他存活玩家");
 
         // 选中目标后应更新提示并允许提交
-        var wolf = Apply(State(Phases.Night, Roles.Werewolf, yourId: 0, playerCount: 4));
+        var wolf = Apply(State(Phases.Night, Roles.Werewolf, yourId: 0, playerCount: 4, actingRole: Roles.Werewolf));
         Check.Equal("确认击杀", wolf.Actions.Single().Label, "夜晚 狼人：提交按钮文案");
         Check.False(wolf.Actions.Single().IsEnabled, "夜晚 狼人：未选目标时不可提交");
 
@@ -172,8 +208,27 @@ public static class ActionComputationTests
         Check.False(wolf.Actions.Single().IsEnabled, "夜晚 狼人：再次点击取消选择");
 
         // 已出局的玩家夜晚没有任何操作
-        var dead = Apply(State(Phases.Night, Roles.Seer, yourId: 0, isAlive: false, dead: new[] { 0 }));
+        var dead = Apply(State(Phases.Night, Roles.Seer, yourId: 0, isAlive: false, dead: new[] { 0 }, actingRole: Roles.Seer));
         Check.Equal(0, dead.Actions.Count, "夜晚 出局玩家：没有操作");
+    }
+
+    /// <summary>“未轮到放技能时不能放技能”的回归用例。</summary>
+    private static void NightTurnGating()
+    {
+        // 狼人玩家，但当前轮到守卫行动 → 不应出现击杀按钮、不可选目标。
+        var wolf = Apply(State(Phases.Night, Roles.Werewolf, yourId: 0, playerCount: 5, actingRole: Roles.Guard));
+        Check.Equal(0, wolf.Actions.Count, "未轮到：狼人看不到击杀按钮");
+        Check.False(wolf.Players.Any(p => p.Selectable), "未轮到：狼人无可选目标");
+        Check.True(wolf.ActionHint.Contains("守卫"), "未轮到：提示当前轮到守卫");
+
+        // 轮到自己（狼人）时才出现击杀按钮。
+        var wolfTurn = Apply(State(Phases.Night, Roles.Werewolf, yourId: 0, playerCount: 5, actingRole: Roles.Werewolf));
+        Check.Equal(1, wolfTurn.Actions.Count, "轮到：狼人出现击杀按钮");
+        Check.True(wolfTurn.Players.Any(p => p.Selectable), "轮到：狼人可选目标");
+
+        // 女巫轮到时只有毒药需要选目标；未轮到守卫阶段则无操作。
+        var witchIdle = Apply(State(Phases.Night, Roles.Witch, yourId: 1, playerCount: 5, actingRole: Roles.Werewolf));
+        Check.Equal(0, witchIdle.Actions.Count, "未轮到：女巫看不到按钮");
     }
 
     // ==================== 投票 ====================

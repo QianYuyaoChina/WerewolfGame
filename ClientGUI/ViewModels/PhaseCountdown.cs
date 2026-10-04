@@ -1,5 +1,5 @@
 using System.Windows.Threading;
-using ClientGUI.Models;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
 
@@ -20,10 +20,13 @@ public sealed class PhaseCountdown
         _timer.Tick += (_, _) => Tick();
     }
 
-    /// <summary>进入新阶段：按阶段秒数启动（不限时的阶段直接停表）。</summary>
-    public void Start(string phase)
+    /// <summary>
+    /// 进入新阶段：按阶段秒数启动（不限时的阶段直接停表）。
+    /// 秒数优先取服务端下发的 <paramref name="rules"/>，未提供时回退到内置默认值。
+    /// </summary>
+    public void Start(string phase, GameRules? rules = null)
     {
-        _secondsLeft = Phases.CountdownSeconds(phase);
+        _secondsLeft = rules?.SecondsForPhase(phase) ?? Phases.CountdownSeconds(phase);
         if (_secondsLeft > 0) _timer.Start();
         else _timer.Stop();
         RaiseTextChanged();

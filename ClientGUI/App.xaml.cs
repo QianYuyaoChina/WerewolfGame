@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
-using ClientGUI.Services;
 using ClientGUI.Views;
+using Werewolf.Client.Share;
 
 namespace ClientGUI
 {

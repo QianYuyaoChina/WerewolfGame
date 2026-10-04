@@ -2,11 +2,11 @@
   "profiles": {
     "Werewolf.Server": {
       "commandName": "Project",
-      "launchBrowser": true,
+      "launchBrowser": false,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "applicationUrl": "https://localhost:8069;http://localhost:8070"
+      "applicationUrl": "http://localhost:5000"
     }
   }
 }

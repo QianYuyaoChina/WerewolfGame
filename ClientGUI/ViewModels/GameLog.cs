@@ -38,6 +38,9 @@ public sealed class GameLog
         while (Entries.Count > MaxEntries) Entries.RemoveAt(0);
     }
 
+    /// <summary>清空全部消息（供菜单「视图 → 清空消息」使用）。</summary>
+    public void Clear() => Entries.Clear();
+
     /// <summary>按消息前缀判断日志类型。</summary>
     public static string Classify(string message)
     {

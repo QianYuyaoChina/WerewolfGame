@@ -1,7 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
-using ClientGUI.Models;
-using ClientGUI.Services;
+using System.Windows.Media;
+using System.Windows.Threading;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
 
@@ -20,11 +21,17 @@ public sealed class GameViewModel : ObservableObject
     private readonly GameCommands _commands;
     private readonly GameActionFactory _actionFactory;
 
+    /// <summary>心跳定时器：周期性地与服务端互发一次空操作，用于探测连接是否仍然可用。</summary>
+    private readonly DispatcherTimer _heartbeat = new() { Interval = TimeSpan.FromSeconds(20) };
+
     /// <summary>UI 线程上下文：服务器回调来自后台线程，状态更新必须回到这里。</summary>
     private readonly SynchronizationContext? _ui;
 
     // ---------- 服务器状态 ----------
     private GameStateDto? _state;
+
+    /// <summary>服务端下发的本局规则（倒计时 / 人数下限等）；未收到时为 null。</summary>
+    private GameRules? _rules;
 
     /// <summary>当前回合标识（天数 + 阶段），用于判断是否进入新一轮。</summary>
     private (int Day, string Phase) _roundKey = (-1, "");
@@ -43,6 +50,8 @@ public sealed class GameViewModel : ObservableObject
     private string _logStatus = "";
     private bool _isJoined;
     private bool _isConnected;
+    private bool _isReconnecting;
+    private int _latencyMs = -1;
     private string _yourRole = "";
     private string _yourRoleDesc = "";
     private int _yourId;
@@ -50,6 +59,7 @@ public sealed class GameViewModel : ObservableObject
     private int _day;
     private string _phase = Phases.Waiting;
     private bool _isHost;
+    private string _actingRole = "";
     private string _countdownText = "";
     private string _actionHint = "";
     private string _chatText = "";
@@ -77,8 +87,15 @@ public sealed class GameViewModel : ObservableObject
 
         DisconnectCommand = new AsyncRelayCommand(_ => LeaveRoomAsync());
         SendChatCommand = new RelayCommand(_ => SendChat());
+        ClearLogCommand = new RelayCommand(_ => ClearLog());
 
         _countdown.TextChanged += text => CountdownText = text;
+
+        // 心跳：每 20 秒测一次往返时延；失败即视为连接异常（后续由 SignalR 重连接管）。
+        _heartbeat.Tick += (_, _) => _ = PingOnceAsync();
+
+        // 消息条数变化时刷新「清空消息」菜单项的可用状态。
+        _log.Entries.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLog));
 
         _client.MessageReceived += message => OnUi(() => OnMessageReceived(message));
         _client.StateReceived += state => OnUi(() => OnStateReceived(state));
@@ -114,6 +131,12 @@ public sealed class GameViewModel : ObservableObject
     public AsyncRelayCommand DisconnectCommand { get; }
     public RelayCommand SendChatCommand { get; }
 
+    /// <summary>清空房间消息记录（菜单「视图 → 清空消息」）。</summary>
+    public RelayCommand ClearLogCommand { get; }
+
+    /// <summary>是否还有消息可清空（用于菜单项启用状态）。</summary>
+    public bool HasLog => _log.Entries.Count > 0;
+
     /// <summary>房主开始游戏：左栏按钮与操作面板里的“开始游戏”共用同一个命令。</summary>
     public ICommand StartGameCommand => _commands.StartGame;
 
@@ -147,8 +170,54 @@ public sealed class GameViewModel : ObservableObject
         {
             if (!Set(ref _isConnected, value)) return;
             OnPropertyChanged(nameof(CanLeaveRoom));
+            OnPropertyChanged(nameof(ConnectionIndicatorText));
+            OnPropertyChanged(nameof(ConnectionIndicatorBrush));
+            OnPropertyChanged(nameof(LatencyText));
+            OnPropertyChanged(nameof(HasLatency));
         }
     }
+
+    /// <summary>是否正在自动重连（连接中断但尚未放弃）。</summary>
+    public bool IsReconnecting
+    {
+        get => _isReconnecting;
+        private set
+        {
+            if (!Set(ref _isReconnecting, value)) return;
+            OnPropertyChanged(nameof(ConnectionIndicatorText));
+            OnPropertyChanged(nameof(ConnectionIndicatorBrush));
+        }
+    }
+
+    /// <summary>最近一次心跳往返时延（毫秒）；−1 表示未测量。</summary>
+    public int LatencyMs
+    {
+        get => _latencyMs;
+        private set
+        {
+            if (!Set(ref _latencyMs, value)) return;
+            OnPropertyChanged(nameof(LatencyText));
+            OnPropertyChanged(nameof(HasLatency));
+        }
+    }
+
+    /// <summary>状态栏连接指示灯文案：已连接 / 重连中 / 未连接。</summary>
+    public string ConnectionIndicatorText =>
+        !IsConnected ? "🔴 未连接"
+        : IsReconnecting ? "🟡 重连中…"
+        : "🟢 已连接";
+
+    /// <summary>连接指示灯配色。</summary>
+    public Brush ConnectionIndicatorBrush =>
+        !IsConnected ? UiBrushes.Dead
+        : IsReconnecting ? UiBrushes.Warning
+        : UiBrushes.Alive;
+
+    /// <summary>状态栏延迟文案（未连接或未测量时为空）。</summary>
+    public string LatencyText => HasLatency ? $"延迟 {LatencyMs} ms" : "";
+
+    /// <summary>是否有可展示的延迟数值。</summary>
+    public bool HasLatency => IsConnected && LatencyMs >= 0;
 
     /// <summary>已加入房间后允许主动退出。</summary>
     public bool CanLeaveRoom => IsJoined || IsConnected;
@@ -223,6 +292,20 @@ public sealed class GameViewModel : ObservableObject
     public System.Windows.Media.Brush PhaseBrush => UiBrushes.PhaseBrush(Phase);
     public bool IsWaiting => Phase == Phases.Waiting;
 
+    /// <summary>夜晚当前轮到行动的角色（中文名）；未轮到或非夜晚为空字符串。</summary>
+    public string ActingRole
+    {
+        get => _actingRole;
+        private set
+        {
+            if (Set(ref _actingRole, value)) OnPropertyChanged(nameof(IsMyTurn));
+        }
+    }
+
+    /// <summary>当前是否轮到“我”行动（按身份名比对，忽略空串）。</summary>
+    public bool IsMyTurn =>
+        Phase == Phases.Night && !string.IsNullOrEmpty(ActingRole) && ActingRole == YourRole;
+
     public bool IsHost
     {
         get => _isHost;
@@ -235,11 +318,17 @@ public sealed class GameViewModel : ObservableObject
         }
     }
 
-    public bool CanStartGame => IsHost && IsWaiting;
+    public bool CanStartGame => IsHost && IsWaiting && PlayerCount >= MinPlayers;
     public string StartHint => IsHost
-        ? "你是房主，人齐（至少 4 人）后即可开始。"
+        ? $"你是房主，人齐（至少 {MinPlayers} 人）后即可开始。"
         : "等待房主开始游戏…";
     public bool ShowStartHint => !IsHost;
+
+    /// <summary>服务端下发的最少开局人数（缺省为 4）。</summary>
+    public int MinPlayers => _rules?.MinPlayers ?? 4;
+
+    /// <summary>当前房间人数。</summary>
+    public int PlayerCount => Players.Count;
 
     public string CountdownText
     {
@@ -278,22 +367,32 @@ public sealed class GameViewModel : ObservableObject
     public string EndpointText => IsJoined ? $"服务器：{_client.Endpoint}" : "";
     public string MeText => IsJoined ? $"[{YourId}] {_client.Username}" : "";
 
+    /// <summary>状态栏右下角的版本标识（与「关于」窗口同源）。</summary>
+    public string VersionText => $"客户端 GUI · v{AppInfo.Version}";
+
     // ==================== 退出房间 ====================
 
     private async Task LeaveRoomAsync()
     {
+        _heartbeat.Stop();
         _countdown.Stop();
 
         await _client.DisconnectAsync();
 
         IsJoined = false;
         IsConnected = false;
+        IsReconnecting = false;
+        LatencyMs = -1;
         _state = null;
+        _rules = null;
         _roundKey = (-1, "");
         _selectedTargetId = -1;
         _lastStateHash = int.MinValue;
         Players.Clear();
         Actions.Clear();
+        OnPropertyChanged(nameof(PlayerCount));
+        OnPropertyChanged(nameof(MinPlayers));
+        OnPropertyChanged(nameof(CanStartGame));
         ActionHint = "";
         ChatText = "";
         YourRole = "";
@@ -360,11 +459,20 @@ public sealed class GameViewModel : ObservableObject
 
     // ==================== 服务器事件 ====================
 
-    private void OnStatusChanged(string status) => ConnectionStatus = status;
+    private void OnStatusChanged(string status)
+    {
+        ConnectionStatus = status;
+
+        // 连接状态可能随重连过程变化，一并同步指示灯。
+        IsConnected = _client.IsConnected;
+        IsReconnecting = _client.IsReconnecting;
+    }
 
     private void OnConnectionClosed(Exception? ex)
     {
         IsConnected = false;
+        IsReconnecting = false;
+        LatencyMs = -1;
         if (!IsJoined) return;
         ConnectionStatus = "连接已断开";
         AddLog("⚠️ 与服务器的连接已断开。", LogKinds.Error);
@@ -373,7 +481,24 @@ public sealed class GameViewModel : ObservableObject
     private void OnReconnected(string info)
     {
         IsConnected = true;
+        IsReconnecting = false;
         AddLog("🔄 " + info);
+    }
+
+    /// <summary>心跳一次：测量往返时延；失败时只提示，等待自动重连接管。</summary>
+    private async Task PingOnceAsync()
+    {
+        if (!IsConnected) return;
+
+        try
+        {
+            LatencyMs = await _client.PingAsync();
+        }
+        catch (Exception ex)
+        {
+            LatencyMs = -1;
+            LogStatus = "心跳失败：" + ex.Message;
+        }
     }
 
     private void OnMessageReceived(string message)
@@ -392,6 +517,7 @@ public sealed class GameViewModel : ObservableObject
         }
         _lastStateHash = hash;
         _state = s;
+        _rules = s.Rules;
 
         var roundKey = (s.Day, s.Phase);
         var newRound = roundKey != _roundKey;
@@ -400,7 +526,7 @@ public sealed class GameViewModel : ObservableObject
             _roundKey = roundKey;
             _usedThisRound.Clear();
             _selectedTargetId = -1;
-            _countdown.Start(s.Phase);
+            _countdown.Start(s.Phase, s.Rules);
         }
 
         // 新的一局（天数归零重新开始）时清空药水记录。
@@ -414,6 +540,7 @@ public sealed class GameViewModel : ObservableObject
         YourId = s.YourId;
         IsAlive = s.IsAlive;
         IsHost = s.Players.FirstOrDefault(p => p.IsYou)?.IsHost ?? false;
+        ActingRole = s.ActingRole;
 
         RefreshPlayers();
         RefreshActions();
@@ -427,6 +554,7 @@ public sealed class GameViewModel : ObservableObject
         h.Add(s.YourId);
         h.Add(s.YourRole);
         h.Add(s.IsAlive);
+        h.Add(s.ActingRole);
         foreach (var p in s.Players)
         {
             h.Add(p.Id);
@@ -466,6 +594,10 @@ public sealed class GameViewModel : ObservableObject
             row.IsTarget = row.Id == _selectedTargetId;
             Players.Add(row);
         }
+
+        // 人数变化会影响“能否开始游戏”，需要让菜单/按钮重新求值。
+        OnPropertyChanged(nameof(PlayerCount));
+        OnPropertyChanged(nameof(CanStartGame));
     }
 
     /// <summary>左侧列表点选玩家（可再次点击取消）。</summary>
@@ -493,7 +625,7 @@ public sealed class GameViewModel : ObservableObject
         if (!p.IsAlive || p.IsYou) return false;
         return Phase switch
         {
-            Phases.Night => YourRole switch
+            Phases.Night => IsMyTurn && YourRole switch
             {
                 Roles.Guard or Roles.Werewolf or Roles.Seer => true,
                 Roles.Witch => !_potionsUsed.Contains("poison") && !_usedThisRound.Contains("poison"),
@@ -507,7 +639,8 @@ public sealed class GameViewModel : ObservableObject
 
     /// <summary>当前玩家是否处于“有目标可选”的状态。</summary>
     private bool CanSelectTargets =>
-        (IsAlive && Phase is Phases.Night or Phases.Vote)
+        (IsAlive && Phase == Phases.Vote)
+        || (IsAlive && Phase == Phases.Night && IsMyTurn)
         || Phase == Phases.HunterShoot;
 
     // ==================== 操作面板 ====================
@@ -537,9 +670,12 @@ public sealed class GameViewModel : ObservableObject
             IsAlive = IsAlive,
             IsHost = IsHost,
             CanStartGame = CanStartGame,
+            MinPlayers = s?.Rules?.MinPlayers ?? 4,
             SelectedTargetId = _selectedTargetId,
             UsedThisRound = _usedThisRound,
-            PotionsUsed = _potionsUsed
+            PotionsUsed = _potionsUsed,
+            ActingRole = ActingRole,
+            IsMyTurn = IsMyTurn
         };
     }
 
@@ -684,6 +820,14 @@ public sealed class GameViewModel : ObservableObject
 
     private void AddLog(string text, string kind = LogKinds.Info) => _log.Add(text, kind);
 
+    /// <summary>清空消息记录，并在状态栏给出反馈。</summary>
+    private void ClearLog()
+    {
+        if (!HasLog) return;
+        _log.Clear();
+        LogStatus = "已清空消息记录。";
+    }
+
     public void OnLoaded()
     {
         if (Log.Count == 0)
@@ -691,11 +835,15 @@ public sealed class GameViewModel : ObservableObject
             AddLog("🐺 狼人杀客户端已就绪。");
             AddLog("点击左侧玩家选择目标，右侧提交本阶段的操作；出局后仍可旁观。");
         }
+
+        // 进入主窗口后开始心跳（此时必然已连接）。
+        if (IsConnected) _heartbeat.Start();
     }
 
     /// <summary>窗口关闭时尽力断开连接。</summary>
     public async Task DisposeAsync()
     {
+        _heartbeat.Stop();
         _countdown.Stop();
         try { await _client.DisposeAsync(); } catch { /* 忽略关闭异常 */ }
     }

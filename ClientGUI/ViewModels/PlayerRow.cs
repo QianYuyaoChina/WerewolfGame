@@ -1,4 +1,5 @@
 using System.Windows.Media;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
 
@@ -50,7 +51,7 @@ public sealed class PlayerRow : ObservableObject
     public string Badge => $"[{Id}]";
     public string Slot => Id.ToString();
 
-    public string RoleText => Role is { Length: > 0 } r ? Models.Roles.Emoji(r) + " " + r : "";
+    public string RoleText => Role is { Length: > 0 } r ? Roles.Emoji(r) + " " + r : "";
     public bool HasRole => Role is { Length: > 0 };
 
     public string Tags
@@ -70,12 +71,12 @@ public sealed class PlayerRow : ObservableObject
 
     public Brush RoleBrush => Role switch
     {
-        Models.Roles.Werewolf => Brushes.Salmon,
-        Models.Roles.Seer => Brushes.MediumPurple,
-        Models.Roles.Witch => Brushes.MediumSpringGreen,
-        Models.Roles.Hunter => Brushes.SandyBrown,
-        Models.Roles.Guard => Brushes.LightSkyBlue,
-        Models.Roles.Villager => Brushes.Gainsboro,
+        Roles.Werewolf => Brushes.Salmon,
+        Roles.Seer => Brushes.MediumPurple,
+        Roles.Witch => Brushes.MediumSpringGreen,
+        Roles.Hunter => Brushes.SandyBrown,
+        Roles.Guard => Brushes.LightSkyBlue,
+        Roles.Villager => Brushes.Gainsboro,
         _ => Brushes.Gray
     };
 

@@ -1,4 +1,4 @@
-using ClientGUI.Models;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
 
@@ -17,6 +17,15 @@ public sealed class ActionContext
     public bool IsAlive { get; init; }
     public bool IsHost { get; init; }
     public bool CanStartGame { get; init; }
+
+    /// <summary>开始一局所需的最少人数（服务端规则）。</summary>
+    public int MinPlayers { get; init; } = 4;
+
+    /// <summary>夜晚当前轮到行动的角色（中文名）；未轮到或非夜晚为空字符串。</summary>
+    public string ActingRole { get; init; } = "";
+
+    /// <summary>夜晚当前是否轮到自己行动（服务端下发的 ActingRole 与本人身份一致）。</summary>
+    public bool IsMyTurn { get; init; }
 
     /// <summary>当前选中的目标编号；-1 表示未选择。</summary>
     public int SelectedTargetId { get; init; }
@@ -76,7 +85,7 @@ public sealed class GameActionFactory
             Command = _commands.StartGame,
             IsEnabled = c.CanStartGame,
             Variant = "primary",
-            Hint = c.CanStartGame ? null : (c.IsHost ? "至少需要 4 名玩家" : "只有房主可以开始游戏")
+            Hint = c.CanStartGame ? null : (c.IsHost ? $"至少需要 {c.MinPlayers} 名玩家" : "只有房主可以开始游戏")
         };
 
         return new ActionPlan(new[] { start }, "");
@@ -87,6 +96,13 @@ public sealed class GameActionFactory
     private ActionPlan Night(ActionContext c)
     {
         if (!c.IsAlive) return ActionPlan.HintOnly("你已出局，等待天亮。");
+
+        // 未轮到自己的身份时，不提供任何技能按钮（服务端也会拒绝）。
+        if (!c.IsMyTurn)
+        {
+            var acting = string.IsNullOrEmpty(c.ActingRole) ? "其他角色" : c.ActingRole;
+            return ActionPlan.HintOnly($"夜晚进行中，当前轮到【{acting}】行动，请等待…");
+        }
 
         switch (c.Role)
         {

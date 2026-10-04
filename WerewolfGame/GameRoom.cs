@@ -1,28 +1,40 @@
-using Microsoft.AspNetCore.SignalR;
+using Werewolf.Client.Share;
 
 namespace Werewolf.Server;
 
 public class GameRoom
 {
-    private const int NightActionTimeout = 40_000;
-    private const int VoteTimeout = 45_000;
-    private const int DiscussionTimeout = 45_000;
-
     private readonly List<Player> _players = new();
     private readonly Random _rng = new();
-    private readonly IHubContext<GameHub> _hub;
+
+    /// <summary>本局生效的规则（时长 / 夜晚顺序 / 人数上下限），由配置注入。</summary>
+    private readonly GameRules _rules;
+
+    /// <summary>规范化后的夜晚行动顺序（配置驱动的角色序列）。</summary>
+    private readonly List<Role> _nightOrder;
+
+    /// <summary>出站加密通道：所有推送都由它加密后发出，业务代码不碰密文。</summary>
+    private readonly EncryptedChannel _channel;
     private readonly object _sync = new();
 
     private Phase _phase = Phase.Waiting;
     private int _day;
     private volatile bool _running;
 
+    /// <summary>夜晚当前轮到哪个角色行动；null 表示没有角色正在等待（白天/等待/结束）。</summary>
+    private Role? _actingRole;
+
     private int _wolfTarget = -1;
     private int _guardTarget = -1;
     private int _witchHealTarget = -1;
     private int _witchPoisonTarget = -1;
 
-    public GameRoom(IHubContext<GameHub> hub) => _hub = hub;
+    public GameRoom(EncryptedChannel channel, GameRules rules)
+    {
+        _channel = channel;
+        _rules = rules;
+        _nightOrder = RoleInfo.ResolveNightOrder(rules.NightOrder);
+    }
 
     public bool IsRunning { get { lock (_sync) return _running; } }
     public Phase Phase { get { lock (_sync) return _phase; } }
@@ -54,8 +66,8 @@ public class GameRoom
                 return (false, "游戏进行中，无法加入", null, false);
             if (_phase != Phase.Waiting && _phase != Phase.GameOver)
                 return (false, "房间暂未开放", null, false);
-            if (_players.Count >= 12)
-                return (false, "房间已满（最多 12 人）", null, false);
+            if (_players.Count >= _rules.MaxPlayers)
+                return (false, $"房间已满（最多 {_rules.MaxPlayers} 人）", null, false);
             if (string.IsNullOrWhiteSpace(username))
                 return (false, "用户名不能为空", null, false);
 
@@ -112,8 +124,8 @@ public class GameRoom
 
             // 清理断线玩家
             _players.RemoveAll(p => !p.IsConnected);
-            if (_players.Count < 4) return (false, "至少需要 4 名玩家");
-            if (_players.Count > 12) return (false, "玩家过多");
+            if (_players.Count < _rules.MinPlayers) return (false, $"至少需要 {_rules.MinPlayers} 名玩家");
+            if (_players.Count > _rules.MaxPlayers) return (false, "玩家过多");
 
             // 重置每位玩家状态
             foreach (var p in _players)
@@ -171,6 +183,10 @@ public class GameRoom
             if (_phase != Phase.Night) return;
             var p = _players.FirstOrDefault(x => x.ConnectionId == connId);
             if (p == null || !p.IsAlive) return;
+
+            // 只有“当前轮到行动的角色”才能提交技能，未轮到时一律忽略。
+            if (_actingRole == null || p.Role != _actingRole.Value) return;
+
             p.NightTarget = targetId;
             p.NightActionType = action;
             p.NightActionSubmitted = true;
@@ -244,93 +260,117 @@ public class GameRoom
         await BroadcastAsync($"════ 第 {_day} 夜 · 天黑请闭眼 ════");
         await BroadcastStateAsync();
 
-        // ---------- 守卫 ----------
+        // 夜晚顺序由规则配置驱动（默认 守卫 → 狼人 → 女巫 → 预言家）。
+        foreach (var role in _nightOrder)
+            await NightStepAsync(role);
+    }
+
+    /// <summary>按角色执行一夜中的一步行动。</summary>
+    private async Task NightStepAsync(Role role)
+    {
+        switch (role)
+        {
+            case Role.Guard: await GuardStepAsync(); return;
+            case Role.Werewolf: await WerewolfStepAsync(); return;
+            case Role.Witch: await WitchStepAsync(); return;
+            case Role.Seer: await SeerStepAsync(); return;
+        }
+    }
+
+    /// <summary>守卫：守护一名玩家，不能连续两晚守护同一人。</summary>
+    private async Task GuardStepAsync()
+    {
         var guards = AliveWithRole(Role.Guard);
-        if (guards.Count > 0)
+        if (guards.Count == 0) return;
+
+        await PrivateToAsync(guards, "【守卫】请选择今晚守护的玩家编号（不能连续两晚守护同一人）。");
+        await WaitNightActionAsync(Role.Guard, _rules.NightActionMs);
+
+        var guard = guards[0];
+        int t = guard.NightTarget;
+        if (t >= 0 && t != guard.LastGuardTarget && IsAlive(t))
         {
-            await PrivateToAsync(guards, "【守卫】请选择今晚守护的玩家编号（不能连续两晚守护同一人）。");
-            await WaitNightActionAsync(Role.Guard, NightActionTimeout);
-
-            var guard = guards[0];
-            int t = guard.NightTarget;
-            if (t >= 0 && t != guard.LastGuardTarget && IsAlive(t))
-            {
-                _guardTarget = t;
-                guard.LastGuardTarget = t;
-                await PrivateAsync(guard, $"你守护了 [{t}]{NameOf(t)}。");
-            }
-            else
-            {
-                guard.LastGuardTarget = -1;
-                await PrivateAsync(guard, "守护无效（不能连守同一人 / 目标已死亡），今晚你未守护任何人。");
-            }
+            _guardTarget = t;
+            guard.LastGuardTarget = t;
+            await PrivateAsync(guard, $"你守护了 [{t}]{NameOf(t)}。");
         }
+        else
+        {
+            guard.LastGuardTarget = -1;
+            await PrivateAsync(guard, "守护无效（不能连守同一人 / 目标已死亡），今晚你未守护任何人。");
+        }
+    }
 
-        // ---------- 狼人 ----------
+    /// <summary>狼人：共同选择一名玩家击杀（多数票，平票随机）。</summary>
+    private async Task WerewolfStepAsync()
+    {
         var wolves = AliveWithRole(Role.Werewolf);
-        if (wolves.Count > 0)
-        {
-            string mates = string.Join("、", wolves.Select(w => $"[{IdOf(w)}]{w.Username}"));
-            await PrivateToAsync(wolves, $"【狼人】你的队友：{mates}\n请选择今晚要击杀的目标编号。");
-            await WaitNightActionAsync(Role.Werewolf, NightActionTimeout);
+        if (wolves.Count == 0) return;
 
-            int t = PickMostVotedNight(Role.Werewolf);
-            if (t >= 0 && IsAlive(t)) _wolfTarget = t;
+        string mates = string.Join("、", wolves.Select(w => $"[{IdOf(w)}]{w.Username}"));
+        await PrivateToAsync(wolves, $"【狼人】你的队友：{mates}\n请选择今晚要击杀的目标编号。");
+        await WaitNightActionAsync(Role.Werewolf, _rules.NightActionMs);
 
-            await PrivateToAsync(wolves, _wolfTarget >= 0
-                ? $"你们选择了击杀 [{_wolfTarget}]{NameOf(_wolfTarget)}。"
-                : "你们今晚放弃了击杀。");
-        }
+        int t = PickMostVotedNight(Role.Werewolf);
+        if (t >= 0 && IsAlive(t)) _wolfTarget = t;
 
-        // ---------- 女巫 ----------
+        await PrivateToAsync(wolves, _wolfTarget >= 0
+            ? $"你们选择了击杀 [{_wolfTarget}]{NameOf(_wolfTarget)}。"
+            : "你们今晚放弃了击杀。");
+    }
+
+    /// <summary>女巫：可使用解药救活被击杀者，或用毒药毒杀一名玩家。</summary>
+    private async Task WitchStepAsync()
+    {
         var witch = AliveWithRole(Role.Witch).FirstOrDefault();
-        if (witch != null)
+        if (witch == null) return;
+
+        string killed = _wolfTarget >= 0
+            ? $"今晚 [{_wolfTarget}]{NameOf(_wolfTarget)} 被狼人击杀。"
+            : "今晚没有人被狼人击杀。";
+        await PrivateAsync(witch,
+            $"【女巫】{killed}\n解药：{(witch.HasAntidote ? "可用" : "已用")}　毒药：{(witch.HasPoison ? "可用" : "已用")}\n" +
+            "输入 heal 使用解药 / poison <编号> 使用毒药 / none 不使用。");
+
+        await WaitNightActionAsync(Role.Witch, _rules.NightActionMs);
+
+        string? act = witch.NightActionType;
+        if (act == "heal" && witch.HasAntidote && _wolfTarget >= 0)
         {
-            string killed = _wolfTarget >= 0
-                ? $"今晚 [{_wolfTarget}]{NameOf(_wolfTarget)} 被狼人击杀。"
-                : "今晚没有人被狼人击杀。";
-            await PrivateAsync(witch,
-                $"【女巫】{killed}\n解药：{(witch.HasAntidote ? "可用" : "已用")}　毒药：{(witch.HasPoison ? "可用" : "已用")}\n" +
-                "输入 heal 使用解药 / poison <编号> 使用毒药 / none 不使用。");
-
-            await WaitNightActionAsync(Role.Witch, NightActionTimeout);
-
-            string? act = witch.NightActionType;
-            if (act == "heal" && witch.HasAntidote && _wolfTarget >= 0)
-            {
-                _witchHealTarget = _wolfTarget;
-                witch.HasAntidote = false;
-                await PrivateAsync(witch, $"你使用了解药，救活了 [{_wolfTarget}]{NameOf(_wolfTarget)}。");
-            }
-            else if (act == "poison" && witch.HasPoison && witch.NightTarget >= 0 && IsAlive(witch.NightTarget))
-            {
-                _witchPoisonTarget = witch.NightTarget;
-                witch.HasPoison = false;
-                await PrivateAsync(witch, $"你使用了毒药，毒杀了 [{_witchPoisonTarget}]{NameOf(_witchPoisonTarget)}。");
-            }
-            else
-            {
-                await PrivateAsync(witch, "你今晚没有使用任何药水。");
-            }
+            _witchHealTarget = _wolfTarget;
+            witch.HasAntidote = false;
+            await PrivateAsync(witch, $"你使用了解药，救活了 [{_wolfTarget}]{NameOf(_wolfTarget)}。");
         }
-
-        // ---------- 预言家 ----------
-        var seer = AliveWithRole(Role.Seer).FirstOrDefault();
-        if (seer != null)
+        else if (act == "poison" && witch.HasPoison && witch.NightTarget >= 0 && IsAlive(witch.NightTarget))
         {
-            await PrivateAsync(seer, "【预言家】请选择你要查验的玩家编号。");
-            await WaitNightActionAsync(Role.Seer, NightActionTimeout);
+            _witchPoisonTarget = witch.NightTarget;
+            witch.HasPoison = false;
+            await PrivateAsync(witch, $"你使用了毒药，毒杀了 [{_witchPoisonTarget}]{NameOf(_witchPoisonTarget)}。");
+        }
+        else
+        {
+            await PrivateAsync(witch, "你今晚没有使用任何药水。");
+        }
+    }
 
-            int t = seer.NightTarget;
-            if (t >= 0 && IsAlive(t))
-            {
-                var target = PlayerById(t)!;
-                await PrivateAsync(seer, $"🔍 查验结果：[{t}]{target.Username} 是 【{(target.IsWolf ? "狼人" : "好人")}】。");
-            }
-            else
-            {
-                await PrivateAsync(seer, "你今晚没有查验任何人。");
-            }
+    /// <summary>预言家：查验一名玩家的阵营。</summary>
+    private async Task SeerStepAsync()
+    {
+        var seer = AliveWithRole(Role.Seer).FirstOrDefault();
+        if (seer == null) return;
+
+        await PrivateAsync(seer, "【预言家】请选择你要查验的玩家编号。");
+        await WaitNightActionAsync(Role.Seer, _rules.NightActionMs);
+
+        int t = seer.NightTarget;
+        if (t >= 0 && IsAlive(t))
+        {
+            var target = PlayerById(t)!;
+            await PrivateAsync(seer, $"🔍 查验结果：[{t}]{target.Username} 是 【{(target.IsWolf ? "狼人" : "好人")}】。");
+        }
+        else
+        {
+            await PrivateAsync(seer, "你今晚没有查验任何人。");
         }
     }
 
@@ -373,9 +413,9 @@ public class GameRoom
         if (await CheckGameOverAsync()) return;
 
         SetPhase(Phase.Discussion);
-        await BroadcastAsync($"💬 自由讨论时间（{DiscussionTimeout / 1000} 秒），输入 `chat 内容` 发言。");
+        await BroadcastAsync($"💬 自由讨论时间（{_rules.DiscussionSeconds} 秒），输入 `chat 内容` 发言。");
         await BroadcastStateAsync();
-        await Task.Delay(DiscussionTimeout);
+        await Task.Delay(_rules.DiscussionMs);
 
         if (await CheckGameOverAsync()) return;
 
@@ -400,7 +440,7 @@ public class GameRoom
                 var alive = _players.Where(p => p.IsAlive && p.IsConnected).ToList();
                 return alive.Count == 0 || alive.All(p => p.VoteSubmitted);
             }
-        }, VoteTimeout);
+        }, _rules.VoteMs);
 
         Dictionary<int, int> tally;
         lock (_sync)
@@ -463,7 +503,7 @@ public class GameRoom
         await WaitUntilAsync(() =>
         {
             lock (_sync) return hunter.HunterShotSubmitted;
-        }, 30_000);
+        }, _rules.HunterShotMs);
 
         hunter.HunterCanShoot = false;
         int target = hunter.NightTarget;
@@ -557,6 +597,9 @@ public class GameRoom
             .ToList();
     }
 
+    /// <summary>房间内已连接（可推送）的玩家快照。</summary>
+    public List<Player> ConnectedPlayers() => Connected();
+
     private int PickMostVotedNight(Role role)
     {
         lock (_sync)
@@ -577,16 +620,29 @@ public class GameRoom
 
     private async Task WaitNightActionAsync(Role role, int timeoutMs)
     {
-        await WaitUntilAsync(() =>
+        // 进入等待前标记“当前轮到该角色”，期间其他角色提交的技能会被忽略。
+        lock (_sync) _actingRole = role;
+
+        // 广播一次状态，让所有客户端知道现在轮到谁行动（用于“未轮到不能放技能”）。
+        await BroadcastStateAsync();
+
+        try
         {
-            lock (_sync)
+            await WaitUntilAsync(() =>
             {
-                var actors = _players
-                    .Where(p => p.IsAlive && p.Role == role && p.IsConnected)
-                    .ToList();
-                return actors.Count == 0 || actors.All(p => p.NightActionSubmitted);
-            }
-        }, timeoutMs);
+                lock (_sync)
+                {
+                    var actors = _players
+                        .Where(p => p.IsAlive && p.Role == role && p.IsConnected)
+                        .ToList();
+                    return actors.Count == 0 || actors.All(p => p.NightActionSubmitted);
+                }
+            }, timeoutMs);
+        }
+        finally
+        {
+            lock (_sync) _actingRole = null;
+        }
     }
 
     private static async Task<bool> WaitUntilAsync(Func<bool> condition, int timeoutMs)
@@ -605,17 +661,13 @@ public class GameRoom
     public async Task BroadcastAsync(string message)
     {
         foreach (var p in Connected())
-        {
-            try { await _hub.Clients.Client(p.ConnectionId).SendAsync("Message", message); }
-            catch { /* 忽略单个客户端异常 */ }
-        }
+            await _channel.SendMessageAsync(p.ConnectionId, message);
     }
 
     private async Task PrivateAsync(Player p, string message)
     {
         if (!p.IsConnected || string.IsNullOrEmpty(p.ConnectionId)) return;
-        try { await _hub.Clients.Client(p.ConnectionId).SendAsync("Message", message); }
-        catch { }
+        await _channel.SendMessageAsync(p.ConnectionId, message);
     }
 
     private async Task PrivateToAsync(IEnumerable<Player> ps, string message)
@@ -650,6 +702,7 @@ public class GameRoom
         Phase phase;
         int day;
         bool running;
+        Role? actingRole;
         lock (_sync)
         {
             all = _players.ToList();
@@ -657,18 +710,19 @@ public class GameRoom
             phase = _phase;
             day = _day;
             running = _running;
+            actingRole = _actingRole;
         }
 
         foreach (var viewer in viewers)
         {
-            var dto = BuildStateFor(viewer, all, phase, day, running);
-            try { await _hub.Clients.Client(viewer.ConnectionId).SendAsync("State", dto); }
-            catch { }
+            var dto = BuildStateFor(viewer, all, phase, day, running, actingRole, _rules);
+            await _channel.SendStateAsync(viewer.ConnectionId, dto);
         }
     }
 
     private static GameStateDto BuildStateFor(Player viewer, List<Player> all,
-                                              Phase phase, int day, bool running)
+                                              Phase phase, int day, bool running,
+                                              Role? actingRole, GameRules rules)
     {
         bool revealAll = !running || phase == Phase.GameOver;
 
@@ -680,6 +734,8 @@ public class GameRoom
             YourRole = RoleInfo.Name(viewer.Role),
             YourRoleDesc = RoleInfo.Desc(viewer.Role),
             IsAlive = viewer.IsAlive,
+            ActingRole = actingRole.HasValue ? RoleInfo.Name(actingRole.Value) : "",
+            Rules = rules,
             Players = all.Select((p, i) => new PlayerDto
             {
                 Id = i,
@@ -700,5 +756,5 @@ public class GameRoom
 public class GameRoomService
 {
     public GameRoom Room { get; }
-    public GameRoomService(IHubContext<GameHub> hub) => Room = new GameRoom(hub);
+    public GameRoomService(EncryptedChannel channel, GameRules rules) => Room = new GameRoom(channel, rules);
 }

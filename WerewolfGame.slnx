@@ -1,5 +1,7 @@
 <Solution>
   <Project Path="ClientGUI/ClientGUI.csproj" Id="7b026c16-40aa-47d4-995d-dfa0f722d693" />
+  <Project Path="ClientGUI.Tests/ClientGUI.Tests.csproj" />
   <Project Path="Werewolf.Client/Werewolf.Client.csproj" />
+  <Project Path="Werewolf.Client.Share/Werewolf.Client.Share.csproj" />
   <Project Path="WerewolfGame/Werewolf.Server.csproj" />
 </Solution>

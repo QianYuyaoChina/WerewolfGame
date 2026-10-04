@@ -30,32 +30,17 @@ public class Player
     public bool IsWolf => Role == Role.Werewolf;
 }
 
-// ---------- 传输对象 ----------
-
-public class PlayerDto
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = "";
-    public bool IsAlive { get; set; }
-    public bool IsHost { get; set; }
-    public bool IsYou { get; set; }
-    public bool IsConnected { get; set; }
-    public string? Role { get; set; }
-}
-
-public class GameStateDto
-{
-    public string Phase { get; set; } = "";
-    public int Day { get; set; }
-    public int YourId { get; set; }
-    public string YourRole { get; set; } = "";
-    public string YourRoleDesc { get; set; } = "";
-    public bool IsAlive { get; set; }
-    public List<PlayerDto> Players { get; set; } = new();
-}
+// 传输对象（PlayerDto / GameStateDto）统一定义在共享库 Werewolf.Client.Share，
+// 服务端与两个客户端复用同一份，避免字段漂移。
 
 public static class RoleInfo
 {
+    /// <summary>夜晚会“轮到行动”的标准角色，按默认行动顺序排列（守卫 → 狼人 → 女巫 → 预言家）。</summary>
+    public static readonly IReadOnlyList<Role> NightRoles = new[]
+    {
+        Role.Guard, Role.Werewolf, Role.Witch, Role.Seer
+    };
+
     public static string Name(Role r) => r switch
     {
         Role.Villager => "平民",
@@ -77,4 +62,36 @@ public static class RoleInfo
         Role.Guard => "每晚守护一名玩家免受狼人击杀，不能连续两晚守护同一人。",
         _ => ""
     };
+
+    /// <summary>把角色中文名解析回枚举（用于读取配置里的夜晚顺序）；无法识别返回 null。</summary>
+    public static Role? TryParse(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        name = name.Trim();
+
+        foreach (var role in Enum.GetValues<Role>())
+        {
+            if (string.Equals(Name(role), name, StringComparison.Ordinal)) return role;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 把配置里的夜晚顺序规范化：过滤未知角色、去重，并把配置遗漏的标准角色
+    /// 按默认顺序补到末尾，保证夜晚流程不会因为配置写漏而跳过某个角色。
+    /// </summary>
+    public static List<Role> ResolveNightOrder(IEnumerable<string>? configured)
+    {
+        var order = new List<Role>();
+        foreach (var name in configured ?? Enumerable.Empty<string>())
+        {
+            var role = TryParse(name);
+            if (role.HasValue && !order.Contains(role.Value)) order.Add(role.Value);
+        }
+
+        foreach (var role in NightRoles)
+            if (!order.Contains(role)) order.Add(role);
+
+        return order;
+    }
 }

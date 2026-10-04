@@ -14,7 +14,8 @@
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         TextOptions.TextFormattingMode="Ideal"
-        UseLayoutRounding="True">
+        UseLayoutRounding="True"
+        KeyDown="MainWindow_OnKeyDown">
 
     <Window.Resources>
         <ResourceDictionary>
@@ -28,13 +29,55 @@
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- 菜单栏 -->
             <RowDefinition Height="Auto" />  <!-- 标题栏 -->
             <RowDefinition Height="*" />     <!-- 主区域 -->
             <RowDefinition Height="Auto" />  <!-- 状态栏 -->
         </Grid.RowDefinitions>
 
+        <!-- ═══════════════ 菜单栏 ═══════════════ -->
+        <!--
+            常用功能集中于此：游戏（开始 / 退出房间 / 退出程序）、
+            视图（三栏显隐 + 清空消息）、帮助（更新日志 / 关于）。
+            面板显隐与打开子窗口属于“视图层”职责，用代码隐藏处理；
+            真正的游戏动作（开始、退出房间、清空消息）仍走视图模型命令。
+        -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1">
+            <Menu Style="{StaticResource FlatMenu}"
+                  ItemContainerStyle="{StaticResource FlatMenuItem}">
+                <MenuItem Header="游戏(_G)">
+                    <MenuItem Header="开始游戏" InputGestureText="Ctrl+G"
+                              Command="{Binding StartGameCommand}"
+                              IsEnabled="{Binding CanStartGame}" />
+                    <Separator Style="{StaticResource MenuSeparator}" />
+                    <MenuItem Header="退出房间" Command="{Binding DisconnectCommand}"
+                              IsEnabled="{Binding CanLeaveRoom}" />
+                    <MenuItem Header="退出程序" InputGestureText="Ctrl+Q"
+                              Click="Menu_Exit_OnClick" />
+                </MenuItem>
+
+                <MenuItem Header="视图(_V)">
+                    <MenuItem x:Name="MenuTogglePlayers" Header="玩家列表"
+                              IsCheckable="True" IsChecked="True" Click="Menu_TogglePanel_OnClick" />
+                    <MenuItem x:Name="MenuToggleChat" Header="房间消息"
+                              IsCheckable="True" IsChecked="True" Click="Menu_TogglePanel_OnClick" />
+                    <MenuItem x:Name="MenuToggleActions" Header="操作面板"
+                              IsCheckable="True" IsChecked="True" Click="Menu_TogglePanel_OnClick" />
+                    <Separator Style="{StaticResource MenuSeparator}" />
+                    <MenuItem Header="清空消息" InputGestureText="Ctrl+L"
+                              Command="{Binding ClearLogCommand}" IsEnabled="{Binding HasLog}" />
+                </MenuItem>
+
+                <MenuItem Header="帮助(_H)">
+                    <MenuItem Header="更新日志" Click="Menu_Changelog_OnClick" />
+                    <MenuItem Header="关于" InputGestureText="F1" Click="Menu_About_OnClick" />
+                </MenuItem>
+            </Menu>
+        </Border>
+
         <!-- ═══════════════ 标题栏 ═══════════════ -->
-        <Border Grid.Row="0" Background="{StaticResource PanelBrush}" Padding="18,12"
+        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" Padding="18,12"
                 BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1">
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -71,21 +114,22 @@
         </Border>
 
         <!-- ═══════════════ 主区域（三栏） ═══════════════ -->
-        <Grid Grid.Row="1" Margin="14"
+        <Grid Grid.Row="2" Margin="14"
               Visibility="{Binding ShowGamePanel, Converter={StaticResource BoolToVisibility}}">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="286" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="308" />
+                <!-- 列宽与面板可见性由「视图」菜单驱动（见 MainWindow.xaml.cs）。 -->
+                <ColumnDefinition x:Name="PlayersColumn" Width="286" />
+                <ColumnDefinition x:Name="ChatColumn" Width="*" />
+                <ColumnDefinition x:Name="ActionsColumn" Width="308" />
             </Grid.ColumnDefinitions>
 
-            <views:PlayerPanel Grid.Column="0" />
-            <views:ChatPanel Grid.Column="1" x:Name="ChatView" Margin="14,0" />
-            <views:ActionPanel Grid.Column="2" />
+            <views:PlayerPanel x:Name="PlayersView" Grid.Column="0" />
+            <views:ChatPanel x:Name="ChatView" Grid.Column="1" Margin="14,0" />
+            <views:ActionPanel x:Name="ActionsView" Grid.Column="2" />
         </Grid>
 
         <!-- ═══════════════ 状态栏 ═══════════════ -->
-        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" Padding="16,7"
+        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" Padding="16,7"
                 BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,1,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -94,15 +138,20 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource MutedBrush}"
-                           Text="🟢 已连接服务器" Visibility="{Binding IsConnected, Converter={StaticResource BoolToVisibility}}" />
-                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="#FFE06060"
-                           Text="🔴 未连接" Visibility="{Binding IsConnected, Converter={StaticResource InverseBoolToVisibility}}" />
+                <!-- 连接指示灯 + 延迟：由视图模型按“已连接 / 重连中 / 未连接”给出配色与文案。 -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock FontSize="11.5" Foreground="{Binding ConnectionIndicatorBrush}"
+                               Text="{Binding ConnectionIndicatorText}" />
+                    <TextBlock FontSize="11.5" Margin="12,0,0,0" Foreground="{StaticResource MutedBrush}"
+                               Text="{Binding LatencyText}"
+                               Visibility="{Binding HasLatency, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
 
                 <TextBlock Grid.Column="1" Text="{Binding LogStatus}" FontSize="11.5" Margin="16,0"
                            TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedBrush}" />
 
-                <TextBlock Grid.Column="2" Text="客户端 GUI · ClientGUI" FontSize="11" Foreground="#FF5E6A80" />
+                <TextBlock Grid.Column="2" FontSize="11" Foreground="#FF5E6A80"
+                           Text="{Binding VersionText}" ToolTip="客户端版本" />
             </Grid>
         </Border>
     </Grid>

@@ -39,21 +39,21 @@
 
         <!-- ═══════════════ 标题 ═══════════════ -->
         <StackPanel Grid.Row="0" Orientation="Horizontal">
-            <Border Width="44" Height="44" CornerRadius="12" Background="{StaticResource CardBrush}"
+            <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource CardBrush}"
                     VerticalAlignment="Center">
                 <TextBlock Text="🎟" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="房间邀请码" FontSize="17" FontWeight="Bold"
-                           Foreground="{StaticResource TextBrush}" />
+                           Foreground="{DynamicResource TextBrush}" />
                 <TextBlock Text="好友粘贴后可直接进入本房间，无需再输房间密码。" FontSize="12" Margin="0,4,0,0"
-                           Foreground="{StaticResource MutedBrush}" />
+                           Foreground="{DynamicResource MutedBrush}" />
             </StackPanel>
         </StackPanel>
 
         <!-- ═══════════════ 说明 ═══════════════ -->
         <TextBlock Grid.Row="1" Margin="0,16,0,8" FontSize="12" TextWrapping="Wrap"
-                   Foreground="{StaticResource MutedBrush}"
+                   Foreground="{DynamicResource MutedBrush}"
                    Text="邀请码已加密，内含服务器地址、房间号与房间密码；请只发给可信的人。" />
 
         <!-- ═══════════════ 邀请码（只读但可选中复制） ═══════════════ -->
@@ -65,11 +65,11 @@
 
         <!-- ═══════════════ 复制状态 ═══════════════ -->
         <TextBlock x:Name="StatusText" Grid.Row="3" Margin="0,10,0,0" FontSize="11.5"
-                   TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                   TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
 
         <!-- ═══════════════ 用法 ═══════════════ -->
         <TextBlock Grid.Row="4" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap" LineHeight="18"
-                   VerticalAlignment="Top" Foreground="#FF6F7C93"
+                   VerticalAlignment="Top" Foreground="{DynamicResource FaintBrush}"
                    Text="对方怎么用：打开客户端 → 登录窗口的「邀请码」框（或房间列表的邀请码框）粘贴本码 → 点「使用 / 加入」即可直接进房。&#x0a;复制不了时：在上方框内点击 → Ctrl+A 全选 → Ctrl+C 复制。" />
 
         <!-- ═══════════════ 按钮 ═══════════════ -->

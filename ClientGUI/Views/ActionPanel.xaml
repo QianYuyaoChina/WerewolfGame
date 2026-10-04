@@ -16,8 +16,8 @@
     </UserControl.Resources>
 
     <!-- 右栏：当前阶段可执行的操作 -->
-    <Border Background="{StaticResource PanelBrush}" CornerRadius="10"
-            BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" Padding="14">
+    <Border Background="{DynamicResource PanelBrush}" CornerRadius="10"
+            BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Padding="14">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -30,17 +30,17 @@
                           HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <!-- 阶段提示 -->
-                    <Border Background="{StaticResource CardBrush}" CornerRadius="8" Padding="12,10"
+                    <Border Background="{DynamicResource CardBrush}" CornerRadius="8" Padding="12,10"
                             Margin="0,0,0,14">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="{Binding PhaseDisplay}" FontSize="14" FontWeight="SemiBold"
                                            Foreground="{Binding PhaseBrush}" />
                                 <TextBlock Text="{Binding DayText}" FontSize="11.5" Margin="10,2,0,0"
-                                           Foreground="{StaticResource MutedBrush}" />
+                                           Foreground="{DynamicResource MutedBrush}" />
                             </StackPanel>
                             <TextBlock Text="{Binding ActionHint}" FontSize="11.5" Margin="0,7,0,0"
-                                       TextWrapping="Wrap" Foreground="#FFA9B4C8"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMidBrush}"
                                        Visibility="{Binding HasActionHint, Converter={StaticResource BoolToVisibility}}" />
                         </StackPanel>
                     </Border>
@@ -55,13 +55,13 @@
                     -->
                     <TextBlock Text="当前阶段暂无可用操作，请等待服务器提示。"
                                TextWrapping="Wrap" Margin="2,4,2,0"
-                               Foreground="{StaticResource MutedBrush}" FontSize="12"
+                               Foreground="{DynamicResource MutedBrush}" FontSize="12"
                                Visibility="{Binding IsActionsEmpty, Converter={StaticResource BoolToVisibility}}" />
 
-                    <Border Height="1" Background="{StaticResource BorderBrush2}" Margin="0,10,0,12" />
+                    <Border Height="1" Background="{DynamicResource BorderBrush2}" Margin="0,10,0,12" />
 
                     <TextBlock Text="玩法提示" Style="{StaticResource SectionTitle}" />
-                    <TextBlock FontSize="11" Foreground="#FF8D9AB2" TextWrapping="Wrap"
+                    <TextBlock FontSize="11" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
                                Text="· 夜晚：狼人选择击杀目标，预言家查验，女巫用药，守卫守护。&#x0a;· 白天：讨论后投票放逐一名玩家。&#x0a;· 猎人出局时可开枪带走一名玩家。&#x0a;· 指令与服务器约定一致：数字编号选择目标，-1 表示弃票 / 放弃。" />
                 </StackPanel>
             </ScrollViewer>

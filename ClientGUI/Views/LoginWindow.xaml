@@ -11,7 +11,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:LoginViewModel}"
         Title="狼人杀 · 登录"
-        Height="648" Width="440"
+        Height="755" Width="450"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource BgBrush}"
@@ -31,13 +31,20 @@
 
     <Grid Margin="32,26">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />  <!-- 标题 -->
-            <RowDefinition Height="Auto" />  <!-- 服务器地址 -->
-            <RowDefinition Height="Auto" />  <!-- 用户名 -->
-            <RowDefinition Height="Auto" />  <!-- 密码 -->
-            <RowDefinition Height="Auto" />  <!-- 登录按钮 -->
-            <RowDefinition Height="Auto" />  <!-- 状态 -->
-            <RowDefinition Height="*" />     <!-- 底部提示 -->
+            <RowDefinition Height="Auto" />
+            <!-- 标题 -->
+            <RowDefinition Height="Auto" />
+            <!-- 服务器地址 -->
+            <RowDefinition Height="Auto" />
+            <!-- 用户名 -->
+            <RowDefinition Height="Auto" />
+            <!-- 密码 -->
+            <RowDefinition Height="Auto" />
+            <!-- 登录按钮 -->
+            <RowDefinition Height="Auto" />
+            <!-- 状态 -->
+            <RowDefinition Height="*" />
+            <!-- 底部提示 -->
         </Grid.RowDefinitions>
 
         <!-- ═══════════════ 标题 ═══════════════ -->
@@ -45,10 +52,10 @@
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                 <TextBlock Text="🐺" FontSize="26" VerticalAlignment="Center" />
                 <TextBlock Text="狼人杀" FontSize="22" FontWeight="Bold" Margin="10,0,0,0"
-                           VerticalAlignment="Center" Foreground="{StaticResource TextBrush}" />
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
             <TextBlock Text="登录后进入房间列表" FontSize="12" Margin="0,8,0,0"
-                       HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                       HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
         </StackPanel>
 
         <!-- ═══════════════ 服务器地址 + 邀请码 ═══════════════ -->
@@ -79,7 +86,7 @@
                         IsEnabled="{Binding IsIdle}" />
             </Grid>
             <TextBlock Text="{Binding InviteHint}" FontSize="11.5" Margin="0,8,0,0" TextWrapping="Wrap"
-                       Foreground="#FF8FE3B4"
+                       Foreground="{DynamicResource OkBrush}"
                        Visibility="{Binding HasInviteHint, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
 
@@ -111,7 +118,7 @@
 
         <!-- ═══════════════ 状态 ═══════════════ -->
         <Border Grid.Row="5" Margin="0,14,0,0" Padding="12,9" CornerRadius="6"
-                Background="{StaticResource CardBrush}">
+                Background="{DynamicResource CardBrush}">
             <!--
                 文字颜色交给样式 + DataTrigger；不要在元素上直接写 Foreground，
                 本地值优先级高于样式触发器，会让“失败标红”失效。
@@ -121,7 +128,7 @@
                     <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding ShowError}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -129,9 +136,21 @@
             </TextBlock>
         </Border>
 
-        <!-- ═══════════════ 底部提示 ═══════════════ -->
-        <TextBlock Grid.Row="6" Margin="0,16,0,0" FontSize="11" TextWrapping="Wrap"
-                   Foreground="#FF6F7C93" VerticalAlignment="Bottom"
-                   Text="首次登录的用户名会自动注册；掉线后用相同的用户名 + 密码重新登录即可恢复原房间身份。&#x0a;收到邀请码时可直接粘贴到上方，登录后自动进入对应房间（含房间密码）。&#x0a;默认地址 http://localhost:5000/gamehub（快速幂协商密钥 + 会话加密）" />
+        <!-- ═══════════════ 底部：设置 + 提示 ═══════════════ -->
+        <Grid Grid.Row="6" Margin="0,16,0,0" VerticalAlignment="Bottom">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 登录界面也能进设置（主题等）；快捷键 Ctrl+, 同样可用。 -->
+            <Button Grid.Row="0" Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="12,6"
+                    HorizontalAlignment="Right" Margin="0,0,0,10" Click="Settings_OnClick"
+                    ToolTip="外观主题等设置（快捷键 Ctrl + ,）" />
+
+            <TextBlock Grid.Row="1" FontSize="11" TextWrapping="Wrap"
+                       Foreground="{DynamicResource FaintBrush}"
+                       Text="首次登录的用户名会自动注册；掉线后用相同的用户名 + 密码重新登录即可恢复原房间身份。&#x0a;收到邀请码时可直接粘贴到上方，登录后自动进入对应房间（含房间密码）。&#x0a;默认地址 http://localhost:5000/gamehub（快速幂协商密钥 + 会话加密）" />
+        </Grid>
     </Grid>
 </Window>

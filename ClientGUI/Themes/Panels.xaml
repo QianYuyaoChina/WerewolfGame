@@ -3,12 +3,14 @@
                     xmlns:vm="clr-namespace:ClientGUI.ViewModels">
 
     <!--
-        本字典在解析期需要 FlatButton / AccentBrush / 日志配色 / 转换器等，
-        因此必须显式合并 Palette 与 DarkTheme，不能依赖 MainWindow 的兄弟字典。
+        本字典在解析期需要 FlatButton / 转换器，因此必须显式合并 Converters 与 Controls，
+        不能依赖 MainWindow 的兄弟字典。
+        颜色不在合并列表里：它由 ThemeManager 挂到 Application 级，本字典只通过
+        {DynamicResource XxxBrush} 引用，才能做到运行期换主题。
     -->
     <ResourceDictionary.MergedDictionaries>
-        <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Palette.xaml" />
-        <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/DarkTheme.xaml" />
+        <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Converters.xaml" />
+        <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Controls.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -30,9 +32,9 @@
 
                 <!-- 编号 -->
                 <Border Grid.Column="0" Width="30" Height="30" CornerRadius="15"
-                        Background="#FF2B3446" VerticalAlignment="Center">
+                        Background="{DynamicResource ChipBrush}" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Slot}" FontSize="13" FontWeight="SemiBold"
-                               Foreground="#FFCFDAEC"
+                               Foreground="{DynamicResource TextSoftBrush}"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
 
@@ -40,17 +42,17 @@
                 <StackPanel Grid.Column="1" Margin="10,0,6,0" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{Binding Name}" FontSize="13.5" TextTrimming="CharacterEllipsis"
-                                   Foreground="#FFE8EDF6">
+                                   Foreground="{DynamicResource TextBrush}">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsYou}" Value="True">
                                             <Setter Property="FontWeight" Value="Bold" />
-                                            <Setter Property="Foreground" Value="#FF9FC0FF" />
+                                            <Setter Property="Foreground" Value="{DynamicResource AccentSoftBrush}" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsDead}" Value="True">
                                             <Setter Property="TextDecorations" Value="Strikethrough" />
-                                            <Setter Property="Foreground" Value="#FF74809A" />
+                                            <Setter Property="Foreground" Value="{DynamicResource FaintBrush}" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -58,7 +60,7 @@
                         </TextBlock>
                     </StackPanel>
 
-                    <TextBlock Text="{Binding Tags}" FontSize="10.5" Foreground="#FF8D9AB2"
+                    <TextBlock Text="{Binding Tags}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}"
                                Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
                                Visibility="{Binding HasTags, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
@@ -68,7 +70,7 @@
                     <TextBlock Text="{Binding RoleText}" FontSize="11.5" HorizontalAlignment="Right"
                                Foreground="{Binding RoleBrush}"
                                Visibility="{Binding HasRole, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <TextBlock Text="✔ 已选" FontSize="10.5" Foreground="#FF7CC4FF" HorizontalAlignment="Right"
+                    <TextBlock Text="✔ 已选" FontSize="10.5" Foreground="{DynamicResource AccentSoftBrush}" HorizontalAlignment="Right"
                                Margin="0,2,0,0"
                                Visibility="{Binding IsTarget, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
@@ -88,21 +90,21 @@
                     <Setter Property="Padding" Value="12,10" />
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsPrimary}" Value="True">
-                            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-                            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsDanger}" Value="True">
-                            <Setter Property="Background" Value="#FF7A2B2B" />
-                            <Setter Property="BorderBrush" Value="#FFA83C3C" />
+                            <Setter Property="Background" Value="{DynamicResource DangerBgBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource DangerBorderBrush}" />
                         </DataTrigger>
                         <MultiDataTrigger>
                             <MultiDataTrigger.Conditions>
                                 <Condition Binding="{Binding IsPrimary}" Value="True" />
                                 <Condition Binding="{Binding IsEnabled}" Value="False" />
                             </MultiDataTrigger.Conditions>
-                            <Setter Property="Background" Value="{StaticResource CardBrush}" />
-                            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush2}" />
+                            <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
                             <Setter Property="FontWeight" Value="Normal" />
                         </MultiDataTrigger>
                         <MultiDataTrigger>
@@ -110,8 +112,8 @@
                                 <Condition Binding="{Binding IsDanger}" Value="True" />
                                 <Condition Binding="{Binding IsEnabled}" Value="False" />
                             </MultiDataTrigger.Conditions>
-                            <Setter Property="Background" Value="{StaticResource CardBrush}" />
-                            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush2}" />
+                            <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
                         </MultiDataTrigger>
                     </Style.Triggers>
                 </Style>
@@ -124,10 +126,10 @@
             -->
             <StackPanel Opacity="{Binding IsEnabled, Converter={StaticResource EnabledToOpacity}}">
                 <TextBlock Text="{Binding Label}" FontSize="13.5" HorizontalAlignment="Left"
-                           Foreground="#FFF0F4FA" />
+                           Foreground="{DynamicResource TextBrush}" />
                 <TextBlock Text="{Binding Hint}" FontSize="10.5" Margin="0,3,0,0"
                            TextWrapping="Wrap" HorizontalAlignment="Left"
-                           Foreground="#FF9DA9BE"
+                           Foreground="{DynamicResource TextMidBrush}"
                            Visibility="{Binding HasHint, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </StackPanel>
         </Button>
@@ -141,24 +143,24 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="{Binding Time}" FontSize="11" Margin="0,1,8,0"
-                       Foreground="#FF5E6A80" VerticalAlignment="Top" />
+                       Foreground="{DynamicResource FaintBrush}" VerticalAlignment="Top" />
             <TextBlock Grid.Column="1" Text="{Binding Text}" FontSize="13" TextWrapping="Wrap">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
-                        <Setter Property="Foreground" Value="#FFDCE3EF" />
+                        <Setter Property="Foreground" Value="{DynamicResource TextSoftBrush}" />
                         <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding Kind}" Value="chat">
-                                <Setter Property="Foreground" Value="{StaticResource ChatBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ChatBrush}" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Kind}" Value="private">
-                                <Setter Property="Foreground" Value="{StaticResource PrivateBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PrivateBrush}" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Kind}" Value="error">
-                                <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding Kind}" Value="phase">
-                                <Setter Property="Foreground" Value="{StaticResource PhaseBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PhaseBrush}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </DataTrigger>
                         </Style.Triggers>

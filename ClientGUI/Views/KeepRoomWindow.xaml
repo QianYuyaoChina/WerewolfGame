@@ -41,39 +41,39 @@
 
         <!-- ═══════════════ 标题 ═══════════════ -->
         <StackPanel Grid.Row="0" Orientation="Horizontal">
-            <Border Width="44" Height="44" CornerRadius="12" Background="{StaticResource CardBrush}"
+            <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource CardBrush}"
                     VerticalAlignment="Center">
                 <TextBlock Text="👑" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="是否保留房间？" FontSize="17" FontWeight="Bold"
-                           Foreground="{StaticResource TextBrush}" />
+                           Foreground="{DynamicResource TextBrush}" />
                 <TextBlock Text="你是房主，且房间内已没有其他玩家。" FontSize="12" Margin="0,4,0,0"
-                           Foreground="{StaticResource MutedBrush}" />
+                           Foreground="{DynamicResource MutedBrush}" />
             </StackPanel>
         </StackPanel>
 
         <!-- ═══════════════ 说明 ═══════════════ -->
         <TextBlock Grid.Row="1" Margin="0,18,0,0" FontSize="12.5" TextWrapping="Wrap" LineHeight="21"
-                   Foreground="#FFC3CCDC"
+                   Foreground="{DynamicResource TextSoftBrush}"
                    Text="保留后房间会继续出现在房间列表中（他人凭房间号 / 邀请码即可加入），一直保留到服务器关闭；不保留则立即关闭该房间。" />
 
         <!-- ═══════════════ 两种选择 ═══════════════ -->
         <StackPanel Grid.Row="2" Margin="0,16,0,0">
-            <Border Background="{StaticResource CardBrush}" CornerRadius="7" Padding="12,9">
+            <Border Background="{DynamicResource CardBrush}" CornerRadius="7" Padding="12,9">
                 <StackPanel>
                     <TextBlock Text="✅ 保留房间" FontSize="12.5" FontWeight="SemiBold"
-                               Foreground="#FF8FE3B4" />
+                               Foreground="{DynamicResource OkBrush}" />
                     <TextBlock Text="房间保持可用，你和好友之后都能重新进入。" FontSize="11.5"
-                               Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                               Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
                 </StackPanel>
             </Border>
-            <Border Background="{StaticResource CardBrush}" CornerRadius="7" Padding="12,9" Margin="0,8,0,0">
+            <Border Background="{DynamicResource CardBrush}" CornerRadius="7" Padding="12,9" Margin="0,8,0,0">
                 <StackPanel>
                     <TextBlock Text="🚪 关闭房间" FontSize="12.5" FontWeight="SemiBold"
-                               Foreground="#FFE06060" />
+                               Foreground="{DynamicResource DangerTextBrush}" />
                     <TextBlock Text="房间立即从列表中移除，房间号随之失效。" FontSize="11.5"
-                               Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                               Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
                 </StackPanel>
             </Border>
         </StackPanel>
@@ -87,7 +87,7 @@
                         Click="KeepRoom_OnClick" />
             </StackPanel>
             <TextBlock Text="直接关闭本窗口视为「保留房间」。" FontSize="11" Margin="0,10,0,0"
-                       HorizontalAlignment="Right" Foreground="#FF6F7C93" />
+                       HorizontalAlignment="Right" Foreground="{DynamicResource FaintBrush}" />
         </StackPanel>
     </Grid>
 </Window>

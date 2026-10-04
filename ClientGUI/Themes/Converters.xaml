@@ -1,0 +1,20 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:ClientGUI">
+
+    <!--
+        转换器（与主题无关，只定义一次）。
+
+        为什么单独成一份字典：XAML 解析期的 StaticResource 只在「本文档 + 其合并字典」里查找，
+        看不到同级的其它合并字典。Controls.xaml 与 Panels.xaml 各自需要这些转换器，
+        因此必须显式合并本文件，不能依赖窗口提供的兄弟字典。
+
+        颜色**不在这里**：颜色按主题分放在 Colors.Dark.xaml / Colors.Light.xaml，
+        由 ThemeManager 在运行期整体替换（见这两个文件与 ThemeManager 的注释）。
+    -->
+
+    <local:BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
+    <local:EnabledToOpacityConverter x:Key="EnabledToOpacity" />
+
+</ResourceDictionary>

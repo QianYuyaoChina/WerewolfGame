@@ -60,6 +60,26 @@
 - `PasswordBox.Password` 不可绑定，用 `PasswordChanged` 手动同步。
 - 不要在 `ItemsControl` 内用 `DataTrigger` 监听自身 `Count`（无限测量递归）。
 - 未 `Show()` 的窗口没有呈现源，Popup 不实例化内部项模板。
+- **菜单外观**：`Menu.ItemContainerStyle` **只作用于菜单栏第一层**，不会传播到下拉项与嵌套子菜单
+  → 那些项会落回 WPF 默认的**浅色**系统外观（深色主题下背景是白的）。
+  解法：在 `Controls.xaml` 末尾注册 `MenuItem` / `Menu` / `Separator` 的**隐式样式**（`BasedOn` 键控样式），
+  让任意层级都走主题模板。`--ui` 冒烟会遍历菜单树断言每一层的 `Template` 都是主题模板。
+- **设置入口**：`Views/SettingsWindow` 是唯一设置入口（外观主题 / 主界面三栏显隐 / 上次使用信息 / 恢复默认），
+  可在任意界面用 **`Ctrl + ,`** 打开（`App` 用 `EventManager.RegisterClassHandler(typeof(Window), UIElement.PreviewKeyDownEvent, …)`
+  统一接管；用 Preview 才不会被输入框吞掉）。快捷键判定抽成 `App.IsSettingsShortcut(key, modifiers)` 纯函数以便测试。
+
+## 主题系统（深/浅色 + 跟随系统）
+- 结构：`Themes/Colors.Dark.xaml` / `Colors.Light.xaml`（**颜色唯一定义处，键名必须两套一致**）、
+  `Converters.xaml`（转换器）、`Controls.xaml`（控件样式，零颜色字面量）、`Panels.xaml`（面板模板）。
+- **颜色一律 `{DynamicResource XxxBrush}`，禁止硬编码 `#RRGGBB`，也不要用 `{StaticResource ...Brush}`**
+  （StaticResource 只求值一次，换主题不生效；只有 `FlatButton` 这类**样式键**才用 StaticResource）。
+- 颜色挂在 **Application 级**（不是各窗口），由 `ThemeManager.Initialize()`（`App.OnStartup` 里，早于任何窗口）
+  插入；`SetTheme` 只替换那个资源槽位 → DynamicResource 重新求值 → 已打开的窗口立刻换色。
+- 「跟随系统」= 读 `HKCU\...\Themes\Personalize\AppsUseLightTheme` + `DispatcherTimer` 4 秒轮询；
+  偏好存 `ui-state.json` 的 `Theme` 字段。界面入口：主窗口「视图 → 主题」。
+- 新增颜色：两套都加同名键。`--ui` 冒烟会**扫描所有 XAML 引用的 `*Brush` 键并校验覆盖**，漏加即断言失败。
+- 已知限制：菜单 Popup 投影色仍是黑色字面量；Win32 标题栏不随应用主题。详见 `docs/ui/THEMING.md`。
+- 主题入口在**设置窗口**里（原「视图 → 主题」子菜单已并入设置窗口）。
 - **剪贴板**：Windows 剪贴板是全局独占资源，被占用时抛 `CLIPBRD_E_CANT_OPEN (0x800401D0)`；
   统一走 `Services/ClipboardHelper.TrySetText`（重试 6 次），失败要给出「Ctrl+A 全选 → Ctrl+C」的兜底提示。
   **凡是需要用户拿走一段文本的场合，一律用可选中文本的独立窗口，不要用 MessageBox**（弹窗里的文字无法用鼠标选中）。

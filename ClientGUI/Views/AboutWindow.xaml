@@ -39,15 +39,15 @@
 
         <!-- ═══════════════ 标题 ═══════════════ -->
         <StackPanel Grid.Row="0" Orientation="Horizontal">
-            <Border Width="58" Height="58" CornerRadius="14" Background="{StaticResource CardBrush}"
+            <Border Width="58" Height="58" CornerRadius="14" Background="{DynamicResource CardBrush}"
                     VerticalAlignment="Center">
                 <TextBlock Text="🐺" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="{x:Static local:AppInfo.ProductName}" FontSize="20" FontWeight="Bold"
-                           Foreground="{StaticResource TextBrush}" />
+                           Foreground="{DynamicResource TextBrush}" />
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                    <Border Background="{StaticResource AccentBrush}" CornerRadius="4" Padding="8,2">
+                    <Border Background="{DynamicResource AccentBrush}" CornerRadius="4" Padding="8,2">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="v" FontSize="11.5" Foreground="White" FontWeight="SemiBold" />
                             <TextBlock Text="{x:Static local:AppInfo.Version}" FontSize="11.5"
@@ -55,7 +55,7 @@
                         </StackPanel>
                     </Border>
                     <TextBlock Text="{x:Static local:AppInfo.Framework}" FontSize="11.5" Margin="10,3,0,0"
-                               Foreground="{StaticResource MutedBrush}" />
+                               Foreground="{DynamicResource MutedBrush}" />
                 </StackPanel>
             </StackPanel>
         </StackPanel>
@@ -63,10 +63,10 @@
         <!-- ═══════════════ 简介 ═══════════════ -->
         <TextBlock Grid.Row="1" Text="{x:Static local:AppInfo.Description}" FontSize="12.5"
                    TextWrapping="Wrap" Margin="0,20,0,0" LineHeight="20"
-                   Foreground="#FFC3CCDC" />
+                   Foreground="{DynamicResource TextSoftBrush}" />
 
         <!-- ═══════════════ 信息表 ═══════════════ -->
-        <Border Grid.Row="2" Margin="0,18,0,0" Background="{StaticResource CardBrush}"
+        <Border Grid.Row="2" Margin="0,18,0,0" Background="{DynamicResource CardBrush}"
                 CornerRadius="8" Padding="16,12">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -81,18 +81,18 @@
 
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="解决方案" Style="{StaticResource MutedText}" />
                 <TextBlock Grid.Row="0" Grid.Column="1" Text="{x:Static local:AppInfo.SolutionName}"
-                           FontSize="12.5" Foreground="{StaticResource TextBrush}" />
+                           FontSize="12.5" Foreground="{DynamicResource TextBrush}" />
 
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="客户端" Style="{StaticResource MutedText}"
                            Margin="0,8,0,0" />
                 <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" FontSize="12.5"
-                           Foreground="{StaticResource TextBrush}"
+                           Foreground="{DynamicResource TextBrush}"
                            Text="WPF 图形界面 · 控制台（共用核心库）" />
 
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="网络加密" Style="{StaticResource MutedText}"
                            Margin="0,8,0,0" />
                 <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" FontSize="12.5"
-                           TextWrapping="Wrap" Foreground="{StaticResource TextBrush}"
+                           TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"
                            Text="PSK 认证 DH 握手 + AES-GCM 会话加密" />
             </Grid>
         </Border>
@@ -108,10 +108,10 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border Background="{StaticResource PanelAltBrush}" CornerRadius="10"
-                                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1"
+                        <Border Background="{DynamicResource PanelAltBrush}" CornerRadius="10"
+                                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
                                 Padding="10,4" Margin="0,0,8,8">
-                            <TextBlock Text="{Binding}" FontSize="11.5" Foreground="#FFCFDAEC" />
+                            <TextBlock Text="{Binding}" FontSize="11.5" Foreground="{DynamicResource TextSoftBrush}" />
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -120,7 +120,7 @@
 
         <!-- ═══════════════ 说明 ═══════════════ -->
         <TextBlock Grid.Row="4" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap" LineHeight="18"
-                   VerticalAlignment="Top" Foreground="#FF6F7C93"
+                   VerticalAlignment="Top" Foreground="{DynamicResource FaintBrush}"
                    Text="本项目用于学习与演示。程序按“现状”提供，作者不对其适用性或运行结果作任何明示或暗示的担保。" />
 
         <!-- ═══════════════ 按钮 ═══════════════ -->

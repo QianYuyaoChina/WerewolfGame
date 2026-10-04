@@ -19,9 +19,9 @@
 
     <Window.Resources>
         <ResourceDictionary>
-            <!-- 用 pack URI 定位，保证从任意工作目录启动、或被其他宿主加载时都能解析。 -->
+            <!-- 用 pack URI 定位，保证从任意工作目录启动、或被其他宿主加载时都能解析。
+                 Panels 内部已合并 Converters + Controls；颜色由 ThemeManager 挂在 Application 级。 -->
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/DarkTheme.xaml" />
                 <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
@@ -42,8 +42,8 @@
             面板显隐与打开子窗口属于“视图层”职责，用代码隐藏处理；
             真正的游戏动作（开始、退出房间、清空消息）仍走视图模型命令。
         -->
-        <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1">
             <Menu Style="{StaticResource FlatMenu}"
                   ItemContainerStyle="{StaticResource FlatMenuItem}">
                 <MenuItem Header="游戏(_G)">
@@ -68,6 +68,8 @@
                     <MenuItem x:Name="MenuToggleActions" Header="操作面板"
                               IsCheckable="True" IsChecked="True" Click="Menu_TogglePanel_OnClick" />
                     <Separator Style="{StaticResource MenuSeparator}" />
+                    <MenuItem Header="设置…" InputGestureText="Ctrl+,"
+                              Click="Menu_Settings_OnClick" />
                     <MenuItem Header="清空消息" InputGestureText="Ctrl+L"
                               Command="{Binding ClearLogCommand}" IsEnabled="{Binding HasLog}" />
                 </MenuItem>
@@ -80,40 +82,40 @@
         </Border>
 
         <!-- ═══════════════ 标题栏 ═══════════════ -->
-        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" Padding="18,12"
-                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" Padding="18,12"
+                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1">
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="🐺" FontSize="20" VerticalAlignment="Center" />
                     <TextBlock Text="狼人杀" FontSize="17" FontWeight="Bold" Margin="8,0,0,0"
-                               VerticalAlignment="Center" Foreground="{StaticResource TextBrush}" />
+                               VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
                     <TextBlock Text="客户端" FontSize="12" Margin="8,2,0,0" VerticalAlignment="Center"
-                               Foreground="{StaticResource MutedBrush}" />
+                               Foreground="{DynamicResource MutedBrush}" />
                 </StackPanel>
 
                 <!-- 当前局势 + 退出房间 -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
                             Visibility="{Binding IsJoined, Converter={StaticResource BoolToVisibility}}">
-                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
-                            BorderThickness="1" BorderBrush="{StaticResource AccentBrush}"
+                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
+                            BorderThickness="1" BorderBrush="{DynamicResource AccentBrush}"
                             Visibility="{Binding HasRoomInfo, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="{Binding RoomHeaderText}" FontSize="12.5" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextBrush}" />
+                                   Foreground="{DynamicResource TextBrush}" />
                     </Border>
-                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
-                        <TextBlock Text="{Binding DayText}" FontSize="12.5" Foreground="{StaticResource TextBrush}" />
+                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
+                        <TextBlock Text="{Binding DayText}" FontSize="12.5" Foreground="{DynamicResource TextBrush}" />
                     </Border>
-                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
+                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
                         <TextBlock Text="{Binding PhaseDisplay}" FontSize="12.5" FontWeight="SemiBold"
                                    Foreground="{Binding PhaseBrush}" />
                     </Border>
-                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
+                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
                             Visibility="{Binding HasCountdown, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="{Binding CountdownText}" FontSize="12.5" Foreground="#FFFFCE6B" />
+                        <TextBlock Text="{Binding CountdownText}" FontSize="12.5" Foreground="{DynamicResource PrivateBrush}" />
                     </Border>
-                    <Border Background="#FF232B3A" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
-                            BorderThickness="1" BorderBrush="{StaticResource BorderBrush2}">
-                        <TextBlock Text="{Binding ConnectionStatus}" FontSize="12" Foreground="{StaticResource MutedBrush}" />
+                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
+                            BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}">
+                        <TextBlock Text="{Binding ConnectionStatus}" FontSize="12" Foreground="{DynamicResource MutedBrush}" />
                     </Border>
                     <Button Content="退出房间" Style="{StaticResource FlatButton}" Padding="12,6"
                             Command="{Binding DisconnectCommand}"
@@ -138,8 +140,8 @@
         </Grid>
 
         <!-- ═══════════════ 状态栏 ═══════════════ -->
-        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" Padding="16,7"
-                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="3" Background="{DynamicResource PanelBrush}" Padding="16,7"
+                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -151,15 +153,15 @@
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock FontSize="11.5" Foreground="{Binding ConnectionIndicatorBrush}"
                                Text="{Binding ConnectionIndicatorText}" />
-                    <TextBlock FontSize="11.5" Margin="12,0,0,0" Foreground="{StaticResource MutedBrush}"
+                    <TextBlock FontSize="11.5" Margin="12,0,0,0" Foreground="{DynamicResource MutedBrush}"
                                Text="{Binding LatencyText}"
                                Visibility="{Binding HasLatency, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
 
                 <TextBlock Grid.Column="1" Text="{Binding LogStatus}" FontSize="11.5" Margin="16,0"
-                           TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedBrush}" />
+                           TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" />
 
-                <TextBlock Grid.Column="2" FontSize="11" Foreground="#FF5E6A80"
+                <TextBlock Grid.Column="2" FontSize="11" Foreground="{DynamicResource FaintBrush}"
                            Text="{Binding VersionText}" ToolTip="客户端版本" />
             </Grid>
         </Border>

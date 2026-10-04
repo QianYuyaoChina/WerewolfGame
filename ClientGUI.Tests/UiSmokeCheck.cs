@@ -1,6 +1,10 @@
+using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using ClientGUI.Services;
 using ClientGUI.Views;
@@ -27,6 +31,10 @@ public static class UiSmokeCheck
             {
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
 
+                // 颜色字典挂在 Application 级（窗口只通过 DynamicResource 引用），
+                // 因此必须先初始化主题再创建任何窗口。
+                ThemeManager.Initialize();
+
                 // 版本号会显示在「关于」窗口与状态栏：不能带 SDK 附加的 git 提交号。
                 Check.True(AppInfo.Version.Length > 0 && !AppInfo.Version.Contains('+'),
                     $"UI：版本号界面友好（{AppInfo.Version}）");
@@ -39,9 +47,12 @@ public static class UiSmokeCheck
                 Try("ChangelogWindow", () => new ChangelogWindow());
                 Try("KeepRoomWindow", () => new KeepRoomWindow());
                 Try("InviteCodeWindow", () => new InviteCodeWindow("WW1:TEST-CODE"));
+                Try("SettingsWindow", () => new SettingsWindow());
 
                 ExerciseMainWindow();
 
+                CheckSettingsWindow();
+                CheckTheme();
                 CheckClipboard();
 
                 app.Shutdown();
@@ -132,6 +143,8 @@ public static class UiSmokeCheck
 
             if (shown)
                 Check.Equal(opened, realized, "UI：各下拉菜单的项模板均已实例化");
+
+            CheckMenuTemplateCoverage(window, menu);
         }
         catch (Exception ex)
         {
@@ -142,6 +155,216 @@ public static class UiSmokeCheck
         {
             try { window?.Close(); } catch { /* 关闭失败无需处理 */ }
         }
+    }
+
+    /// <summary>
+    /// 所有层级的 MenuItem 都必须用主题模板。
+    /// 回归：<c>Menu.ItemContainerStyle</c> **不会传播到嵌套子菜单项**，
+    /// 早期「视图 → 主题」这类二级菜单因此落回 WPF 默认的浅色系统外观，
+    /// 在深色主题下背景是白的。现在改用隐式样式覆盖所有层级，这条断言负责守住它。
+    /// </summary>
+    private static void CheckMenuTemplateCoverage(Window window, Menu menu)
+    {
+        var leaf = window.FindResource("MenuLeafTemplate") as ControlTemplate;
+        var topHeader = window.FindResource("MenuTopLevelHeaderTemplate") as ControlTemplate;
+        var topItem = window.FindResource("MenuTopLevelItemTemplate") as ControlTemplate;
+        var subHeader = window.FindResource("MenuSubmenuHeaderTemplate") as ControlTemplate;
+
+        Check.True(leaf != null && topHeader != null && topItem != null && subHeader != null,
+            "UI：四种菜单项模板均可从窗口资源解析");
+
+        var allowed = new List<ControlTemplate?> { leaf, topHeader, topItem, subHeader };
+
+        var items = new List<MenuItem>();
+        CollectMenuItems(menu, items);
+
+        Check.True(items.Count >= 8, $"UI：菜单项总数 {items.Count}（≥8）");
+
+        var missing = items.Where(i => i.Template == null).ToList();
+        Check.Equal(0, missing.Count,
+            "UI：所有菜单项都已套用模板（未套用：" +
+            string.Join("、", missing.Select(i => i.Header?.ToString())) + "）");
+
+        var wrong = items.Where(i => i.Template != null && !allowed.Contains(i.Template)).ToList();
+        Check.Equal(0, wrong.Count,
+            "UI：所有层级的菜单项都使用主题模板（异常项：" +
+            string.Join("、", wrong.Select(i => i.Header?.ToString())) + "）");
+    }
+
+    /// <summary>递归收集菜单里的所有 MenuItem（含各层嵌套）。</summary>
+    private static void CollectMenuItems(ItemsControl parent, List<MenuItem> into)
+    {
+        foreach (var item in parent.Items)
+        {
+            if (item is not MenuItem menuItem) continue;
+            into.Add(menuItem);
+            CollectMenuItems(menuItem, into);
+        }
+    }
+
+    /// <summary>
+    /// 设置窗口：集中管理外观主题与主界面三栏显隐。
+    /// 这里通过 <see cref="FrameworkElement.FindName"/> 直接驱动控件，
+    /// 不需要真的弹出模态窗口就能验证「显示 → 写回 → 联动」这条链路。
+    /// </summary>
+    private static void CheckSettingsWindow()
+    {
+        var state = UiStateStore.State;
+
+        // 主题单选应反映当前偏好。
+        ThemeManager.SetTheme(AppTheme.Dark);
+        var settings = new SettingsWindow();
+        Check.True((settings.FindName("ThemeDark") as RadioButton)?.IsChecked == true,
+            "设置：主题单选反映当前偏好（深色）");
+
+        ThemeManager.SetTheme(AppTheme.Light);
+        var lightSettings = new SettingsWindow();
+        Check.True((lightSettings.FindName("ThemeLight") as RadioButton)?.IsChecked == true,
+            "设置：主题单选反映当前偏好（浅色）");
+
+        // 三栏显隐开关：勾选变化要写回界面状态（供主窗口联动）。
+        var showChat = settings.FindName("ShowChat") as CheckBox;
+        var showPlayers = settings.FindName("ShowPlayers") as CheckBox;
+        var showActions = settings.FindName("ShowActions") as CheckBox;
+        Check.True(showChat != null && showPlayers != null && showActions != null,
+            "设置：包含三栏显隐开关");
+
+        state.ShowPlayers = true;
+        state.ShowChat = true;
+        state.ShowActions = true;
+
+        showChat!.IsChecked = false;
+        Check.False(state.ShowChat, "设置：取消「显示房间消息」会写回界面状态");
+        showChat.IsChecked = true;
+        Check.True(state.ShowChat, "设置：重新勾选会写回界面状态");
+
+        showActions!.IsChecked = false;
+        Check.False(state.ShowActions, "设置：取消「显示操作面板」会写回界面状态");
+        showActions.IsChecked = true;
+
+        // 上次使用信息应能展示出来（无记录时给占位文案）。
+        var serverText = settings.FindName("ServerText") as TextBlock;
+        Check.True(!string.IsNullOrEmpty(serverText?.Text), "设置：展示上次使用的服务器地址");
+
+        try { settings.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
+        try { lightSettings.Close(); } catch { /* 同上 */ }
+
+        // 「任意界面都能打开设置」依赖 Ctrl+, —— 判定逻辑抽成了纯函数，这里直接验证。
+        Check.True(App.IsSettingsShortcut(Key.OemComma, ModifierKeys.Control),
+            "设置：Ctrl + , 命中「打开设置」快捷键");
+        Check.False(App.IsSettingsShortcut(Key.OemComma, ModifierKeys.None),
+            "设置：单独的逗号不会打开设置");
+        Check.False(App.IsSettingsShortcut(Key.S, ModifierKeys.Control),
+            "设置：Ctrl + S 不会打开设置");
+
+        ThemeManager.SetTheme(AppTheme.System);
+    }
+
+    /// <summary>
+    /// 主题探针：两套配色必须**键完全一致**（缺键会导致切过去以后颜色不更新），
+    /// 且切换后 Application 级颜色确实被替换（DynamicResource 据此重新求值）。
+    /// </summary>
+    private static void CheckTheme()
+    {
+        var dark = new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/ClientGUI;component/Themes/Colors.Dark.xaml")
+        };
+        var light = new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/ClientGUI;component/Themes/Colors.Light.xaml")
+        };
+
+        var darkKeys = dark.Keys.Cast<object>().Select(k => k.ToString() ?? "").OrderBy(k => k, StringComparer.Ordinal).ToList();
+        var lightKeys = light.Keys.Cast<object>().Select(k => k.ToString() ?? "").OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+        Check.True(darkKeys.Count >= 20, $"主题：深色配色键齐全（{darkKeys.Count} 项）");
+        Check.SequenceEqual(darkKeys, lightKeys, "主题：深色与浅色定义了完全相同的配色键");
+
+        ThemeManager.SetTheme(AppTheme.Dark);
+        Check.True(ThemeManager.IsDark, "主题：切换到深色立即生效");
+        var darkBg = (Application.Current.TryFindResource("BgBrush") as SolidColorBrush)?.Color;
+
+        ThemeManager.SetTheme(AppTheme.Light);
+        Check.False(ThemeManager.IsDark, "主题：切换到浅色立即生效");
+        var lightBg = (Application.Current.TryFindResource("BgBrush") as SolidColorBrush)?.Color;
+
+        Check.True(darkBg.HasValue && lightBg.HasValue && darkBg != lightBg,
+            $"主题：切换后背景色确实变化（{darkBg} → {lightBg}）");
+
+        // 深色应该更暗（防止两套配色写反）。
+        Check.True(darkBg!.Value.R + darkBg.Value.G + darkBg.Value.B
+                   < lightBg!.Value.R + lightBg.Value.G + lightBg.Value.B,
+            "主题：深色背景确实比浅色背景暗");
+
+        // 真实窗口也会随主题重新求值（不只是字典被换掉）。
+        var probe = new LoginWindow();
+        ThemeManager.SetTheme(AppTheme.Dark);
+        var winDark = (probe.Background as SolidColorBrush)?.Color;
+        ThemeManager.SetTheme(AppTheme.Light);
+        var winLight = (probe.Background as SolidColorBrush)?.Color;
+        Check.True(winDark.HasValue && winLight.HasValue && winDark != winLight,
+            $"主题：已打开的窗口跟随主题换色（{winDark} → {winLight}）");
+        try { probe.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
+
+        ThemeManager.SetTheme(AppTheme.System);
+        Check.True(ThemeManager.Preference == AppTheme.System, "主题：可切回「跟随系统」");
+
+        CheckReferencedColorKeys(dark, light);
+    }
+
+    /// <summary>
+    /// 扫描所有 XAML 里用到的 <c>{DynamicResource XxxBrush}</c>，逐个确认两套配色都有定义。
+    /// 漏定义不会报错，只会静默回退成默认色（深色底上就是「看不见的文字」），
+    /// 所以这条自动扫描很有必要——它随 XAML 自动更新，不需要维护清单。
+    /// </summary>
+    private static void CheckReferencedColorKeys(ResourceDictionary dark, ResourceDictionary light)
+    {
+        var root = FindRepoRoot();
+        if (root == null)
+        {
+            Console.WriteLine("   · 未找到仓库根目录，跳过配色键扫描");
+            return;
+        }
+
+        var dir = Path.Combine(root, "ClientGUI");
+        if (!Directory.Exists(dir)) return;
+
+        var used = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var file in Directory.EnumerateFiles(dir, "*.xaml", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(file);
+
+            // 先去注释：注释里允许用 {DynamicResource XxxBrush} 当示例（例如 Colors.*.xaml 的说明），
+            // 那些不是真的引用，不能算进来。
+            text = Regex.Replace(text, "<!--.*?-->", "", RegexOptions.Singleline);
+
+            foreach (Match m in Regex.Matches(text, @"\{DynamicResource\s+([A-Za-z0-9_]+)\}"))
+            {
+                var key = m.Groups[1].Value;
+                if (key.EndsWith("Brush", StringComparison.Ordinal)) used.Add(key);
+            }
+        }
+
+        Check.True(used.Count >= 15, $"主题：XAML 中共引用 {used.Count} 个配色键");
+
+        var missingDark = used.Where(k => !dark.Contains(k)).ToList();
+        var missingLight = used.Where(k => !light.Contains(k)).ToList();
+
+        Check.Equal(0, missingDark.Count, "主题：深色配色覆盖全部引用键（缺失：" + string.Join(",", missingDark) + "）");
+        Check.Equal(0, missingLight.Count, "主题：浅色配色覆盖全部引用键（缺失：" + string.Join(",", missingLight) + "）");
+    }
+
+    /// <summary>从当前工作目录向上找含 WerewolfGame.sln 的目录（供读取 XAML 源码）。</summary>
+    private static string? FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "WerewolfGame.sln"))) return dir.FullName;
+            dir = dir.Parent;
+        }
+        return null;
     }
 
     /// <summary>

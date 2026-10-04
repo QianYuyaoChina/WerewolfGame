@@ -1,0 +1,50 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        ═══════════════ 深色主题配色（默认） ═══════════════
+
+        这是「颜色」的唯一来源：所有界面都必须用 {DynamicResource XxxBrush} 引用这里的键，
+        不能写死 #RRGGBB，否则切换主题时不会更新。
+        ThemeManager 在运行期把本字典整体换成 Colors.Light.xaml（键名完全一致），
+        由于 DynamicResource 会重新求值，已打开的窗口会立刻跟着变。
+
+        新增颜色时请同时在 Colors.Light.xaml 里加上同名键。
+    -->
+
+    <!-- 背景与容器 -->
+    <SolidColorBrush x:Key="BgBrush" Color="#FF11141C" />       <!-- 窗口底 -->
+    <SolidColorBrush x:Key="PanelBrush" Color="#FF181D28" />    <!-- 面板 -->
+    <SolidColorBrush x:Key="PanelAltBrush" Color="#FF1F2634" /> <!-- 次级面板 / 悬停行 -->
+    <SolidColorBrush x:Key="CardBrush" Color="#FF232B3A" />     <!-- 卡片 -->
+    <SolidColorBrush x:Key="ChipBrush" Color="#FF232B3A" />     <!-- 状态胶囊 -->
+    <SolidColorBrush x:Key="InputBrush" Color="#FF141924" />    <!-- 输入框底 -->
+    <SolidColorBrush x:Key="ChatBgBrush" Color="#FF12161F" />   <!-- 聊天区底 -->
+    <SolidColorBrush x:Key="HoverBrush" Color="#FF2F3A4E" />    <!-- 列表项悬停 -->
+    <SolidColorBrush x:Key="BorderBrush2" Color="#FF2C3546" />  <!-- 边框 / 分隔线 -->
+
+    <!-- 文字 -->
+    <SolidColorBrush x:Key="TextBrush" Color="#FFE8EDF6" />     <!-- 主文字 -->
+    <SolidColorBrush x:Key="TextSoftBrush" Color="#FFC3CCDC" /> <!-- 次要正文 -->
+    <SolidColorBrush x:Key="TextMidBrush" Color="#FF9DA9BE" />  <!-- 说明文字 -->
+    <SolidColorBrush x:Key="MutedBrush" Color="#FF8D9AB2" />    <!-- 弱化文字 -->
+    <SolidColorBrush x:Key="FaintBrush" Color="#FF6F7C93" />    <!-- 最弱（脚注 / 版本号） -->
+
+    <!-- 强调色 -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF5B8DEF" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#FF6E9CF5" />
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="#FF4A78D6" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#FF9FC0FF" /> <!-- 强调色系的文字 -->
+
+    <!-- 状态色 -->
+    <SolidColorBrush x:Key="DangerBrush" Color="#FFD9534F" />
+    <SolidColorBrush x:Key="DangerBgBrush" Color="#FF7A2B2B" />
+    <SolidColorBrush x:Key="DangerBorderBrush" Color="#FFA03A3A" />
+    <SolidColorBrush x:Key="DangerPressedBrush" Color="#FF9B3838" />
+    <SolidColorBrush x:Key="DangerTextBrush" Color="#FFE06060" />
+    <SolidColorBrush x:Key="OkBrush" Color="#FF8FE3B4" />
+    <SolidColorBrush x:Key="ChatBrush" Color="#FF7BE0C0" />
+    <SolidColorBrush x:Key="PrivateBrush" Color="#FFFFCE6B" />
+    <SolidColorBrush x:Key="ErrorBrush" Color="#FFFF8A8A" />
+    <SolidColorBrush x:Key="PhaseBrush" Color="#FFB79CFF" />
+</ResourceDictionary>

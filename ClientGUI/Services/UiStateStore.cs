@@ -27,6 +27,9 @@ public sealed class UiState
 
     // ---- 房间列表：上次进入过的房间号（便于回填 / 提示） ----
     public string LastRoomId { get; set; } = "";
+
+    // ---- 外观：System / Dark / Light（见 ThemeManager） ----
+    public string Theme { get; set; } = "System";
 }
 
 /// <summary>
@@ -65,6 +68,15 @@ public static class UiStateStore
     {
         if (!Enabled) return;
         Save(State, DefaultPath);
+    }
+
+    /// <summary>恢复默认设置（同时覆盖内存与磁盘）。</summary>
+    public static void Reset()
+    {
+        if (Enabled) _state = new UiState();
+        else _memoryOnly = new UiState();
+
+        Save();
     }
 
     /// <summary>从指定文件读取状态；文件缺失或损坏时返回默认值。</summary>

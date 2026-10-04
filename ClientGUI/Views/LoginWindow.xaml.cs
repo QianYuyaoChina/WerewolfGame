@@ -67,4 +67,7 @@ public partial class LoginWindow : Window
         var box = (PasswordBox)sender;
         if (box.Password != _vm.PasswordInput) _vm.PasswordInput = box.Password;
     }
+
+    /// <summary>登录界面也能打开设置（外观主题等）。</summary>
+    private void Settings_OnClick(object sender, RoutedEventArgs e) => SettingsWindow.Open(this);
 }

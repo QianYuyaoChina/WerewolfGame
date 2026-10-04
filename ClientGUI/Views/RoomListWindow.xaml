@@ -41,9 +41,11 @@
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="🐺" FontSize="20" VerticalAlignment="Center" />
                 <TextBlock Text="房间列表" FontSize="17" FontWeight="Bold" Margin="8,0,0,0"
-                           VerticalAlignment="Center" Foreground="{StaticResource TextBrush}" />
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
                 <TextBlock Text="选择一个房间加入，或创建新房间" FontSize="12" Margin="12,2,0,0"
-                           VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                           VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
+                <Button Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="10,5" Margin="14,0,0,0"
+                        Click="Settings_OnClick" ToolTip="设置（快捷键 Ctrl + ,）" />
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -63,7 +65,7 @@
         </Grid>
 
         <!-- ═══════════════ 列头 ═══════════════ -->
-        <Border Grid.Row="1" Background="{StaticResource CardBrush}" CornerRadius="6" Padding="12,9">
+        <Border Grid.Row="1" Background="{DynamicResource CardBrush}" CornerRadius="6" Padding="12,9">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="84" />
@@ -104,11 +106,11 @@
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource PanelAltBrush}" />
+                                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PanelAltBrush}" />
                                         </Trigger>
                                         <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource CardBrush}" />
-                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardBrush}" />
+                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -129,18 +131,18 @@
                                 <ColumnDefinition Width="128" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="{Binding Id}" FontSize="13" FontWeight="SemiBold"
-                                       Foreground="#FFCFDAEC" VerticalAlignment="Center" />
+                                       Foreground="{DynamicResource TextSoftBrush}" VerticalAlignment="Center" />
                             <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13.5"
-                                       TextTrimming="CharacterEllipsis" Foreground="#FFE8EDF6"
+                                       TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"
                                        VerticalAlignment="Center" />
                             <TextBlock Grid.Column="2" Text="{Binding CountText}" FontSize="12.5"
-                                       Foreground="#FF8D9AB2" VerticalAlignment="Center" />
+                                       Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" />
                             <TextBlock Grid.Column="3" Text="{Binding StatusText}" FontSize="12.5"
-                                       Foreground="#FFB79CFF" VerticalAlignment="Center" />
+                                       Foreground="{DynamicResource PhaseBrush}" VerticalAlignment="Center" />
                             <TextBlock Grid.Column="4" Text="{Binding LockText}" FontSize="12.5"
-                                       Foreground="#FFFFCE6B" VerticalAlignment="Center" />
+                                       Foreground="{DynamicResource PrivateBrush}" VerticalAlignment="Center" />
                             <TextBlock Grid.Column="5" Text="{Binding HostText}" FontSize="12.5"
-                                       TextTrimming="CharacterEllipsis" Foreground="#FF8D9AB2"
+                                       TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}"
                                        VerticalAlignment="Center" />
                         </Grid>
                     </DataTemplate>
@@ -150,13 +152,13 @@
             <!-- 空态提示（不用 DataTrigger 监听 Count，避免测量递归） -->
             <TextBlock Text="暂无房间，点击「创建房间」开一局吧。"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
-                       FontSize="13" Foreground="{StaticResource MutedBrush}"
+                       FontSize="13" Foreground="{DynamicResource MutedBrush}"
                        Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}" />
         </Grid>
 
         <!-- ═══════════════ 选中 + 密码 + 加入 ═══════════════ -->
-        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" CornerRadius="8"
-                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" Padding="14,12" Margin="0,12,0,0">
+        <Border Grid.Row="3" Background="{DynamicResource PanelBrush}" CornerRadius="8"
+                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Padding="14,12" Margin="0,12,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -166,7 +168,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0" Text="{Binding SelectionText}" FontSize="12.5"
-                           VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"
+                           VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"
                            TextTrimming="CharacterEllipsis" />
 
                 <TextBlock Grid.Column="1" Text="密码" Style="{StaticResource MutedText}"
@@ -184,14 +186,14 @@
         </Border>
 
         <!-- ═══════════════ 状态 ═══════════════ -->
-        <Border Grid.Row="4" Background="{StaticResource CardBrush}" CornerRadius="6"
+        <Border Grid.Row="4" Background="{DynamicResource CardBrush}" CornerRadius="6"
                 Padding="12,9" Margin="0,10,0,0">
             <TextBlock Text="{Binding Status}" FontSize="12" TextWrapping="Wrap">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding ShowError}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Threading;
+using ClientGUI.Services;
 using ClientGUI.Views;
 using Werewolf.Client.Share;
 
@@ -18,9 +20,45 @@ namespace ClientGUI
             // 界面流程自己控制：登录窗口关闭不代表程序结束。
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+            // 先把主题颜色挂到 Application 级，再创建任何窗口（否则第一帧没有配色）。
+            ThemeManager.Initialize();
+
+            // 全局快捷键：任意窗口都能按 Ctrl+, 打开设置。
+            RegisterGlobalShortcuts();
+
             RegisterExceptionHandlers();
             ShowLogin();
         }
+
+        // ==================== 全局快捷键 ====================
+
+        /// <summary>
+        /// 给所有 <see cref="Window"/> 注册类级 PreviewKeyDown：
+        /// 登录窗口、房间列表、主窗口乃至各个小对话框里都能随时按 <c>Ctrl + ,</c> 打开设置。
+        /// 用 Preview 是为了先于获得焦点的控件拿到按键（避免被输入框吞掉）。
+        /// </summary>
+        private static void RegisterGlobalShortcuts()
+        {
+            EventManager.RegisterClassHandler(
+                typeof(Window),
+                UIElement.PreviewKeyDownEvent,
+                new KeyEventHandler(OnAnyWindowPreviewKeyDown));
+        }
+
+        private static void OnAnyWindowPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!IsSettingsShortcut(e.Key, Keyboard.Modifiers)) return;
+
+            e.Handled = true;   // 别让 , 落到输入框里
+            SettingsWindow.Open(sender as Window);
+        }
+
+        /// <summary>
+        /// 是否命中「打开设置」快捷键（<c>Ctrl + ,</c>）。
+        /// 抽成纯函数是为了可测：真正的 Ctrl 按键状态在自动化测试里伪造不出来。
+        /// </summary>
+        public static bool IsSettingsShortcut(Key key, ModifierKeys modifiers)
+            => key == Key.OemComma && modifiers == ModifierKeys.Control;
 
         // ==================== 界面流程 ====================
 

@@ -128,7 +128,8 @@ public static class GameRulesTests
                 ShowChat = false,
                 ShowActions = true,
                 ServerUrl = "http://localhost:5000/gamehub",
-                Username = "alice"
+                Username = "alice",
+                Theme = "Light"
             };
             UiStateStore.Save(saved, path);
 
@@ -141,6 +142,10 @@ public static class GameRulesTests
             Check.False(loaded.ShowChat, "界面状态：三栏显隐往返");
             Check.Equal("alice", loaded.Username, "界面状态：上次用户名往返");
             Check.Equal("http://localhost:5000/gamehub", loaded.ServerUrl, "界面状态：上次服务器地址往返");
+            Check.Equal("Light", loaded.Theme, "界面状态：主题偏好往返");
+
+            // 缺省时主题应为「跟随系统」。
+            Check.Equal("System", new UiState().Theme, "界面状态：主题默认跟随系统");
 
             // 文件缺失 / 内容损坏 → 回退默认值，而不是抛异常。
             var missing = UiStateStore.Load(path + ".nope");

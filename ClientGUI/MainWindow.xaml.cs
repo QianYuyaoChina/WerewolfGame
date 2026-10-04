@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using ClientGUI.Services;
 using ClientGUI.Views;
@@ -31,6 +32,10 @@ public partial class MainWindow : Window
         _vm.ConfirmKeepRoom = AskKeepRoom;
 
         _vm.RoomLeft += OnRoomLeft;
+
+        // 设置窗口改三栏显隐时同步过来；窗口关掉要退订（静态事件不能留悬挂引用）。
+        SettingsWindow.ViewOptionsChanged += OnSettingsViewOptionsChanged;
+        Closed += (_, _) => SettingsWindow.ViewOptionsChanged -= OnSettingsViewOptionsChanged;
 
         Loaded += OnLoaded;
         Closing += OnClosing;
@@ -172,6 +177,22 @@ public partial class MainWindow : Window
 
     /// <summary>三个面板开关共用一个处理器：统一按三个开关的当前状态重排布局。</summary>
     private void Menu_TogglePanel_OnClick(object sender, RoutedEventArgs e) => ApplyPanelVisibility();
+
+    /// <summary>打开设置窗口（外观主题 / 主界面视图 / 上次使用信息）。</summary>
+    private void Menu_Settings_OnClick(object sender, RoutedEventArgs e) => SettingsWindow.Open(this);
+
+    /// <summary>
+    /// 设置窗口里改动了三栏显隐 → 把菜单勾选与布局同步过来
+    /// （设置窗口与主窗口「视图」菜单是同一份状态的两种入口，必须保持一致）。
+    /// </summary>
+    private void OnSettingsViewOptionsChanged()
+    {
+        var state = UiStateStore.State;
+        MenuTogglePlayers.IsChecked = state.ShowPlayers;
+        MenuToggleChat.IsChecked = state.ShowChat;
+        MenuToggleActions.IsChecked = state.ShowActions;
+        ApplyPanelVisibility();
+    }
 
     /// <summary>
     /// 把三栏的列宽与可见性同步到菜单勾选状态。

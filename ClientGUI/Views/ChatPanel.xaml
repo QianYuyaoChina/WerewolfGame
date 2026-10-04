@@ -16,8 +16,8 @@
     </UserControl.Resources>
 
     <!-- 中栏：房间消息 + 发言输入 -->
-    <Border Background="{StaticResource PanelBrush}" CornerRadius="10"
-            BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" Padding="14">
+    <Border Background="{DynamicResource PanelBrush}" CornerRadius="10"
+            BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Padding="14">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -28,11 +28,11 @@
             <Grid Grid.Row="0" Margin="0,0,0,10">
                 <TextBlock Text="房间消息" Style="{StaticResource SectionTitle}" Margin="0" />
                 <TextBlock Text="{Binding EndpointText}" FontSize="10.5" HorizontalAlignment="Right"
-                           VerticalAlignment="Center" Foreground="#FF6F7C93"
+                           VerticalAlignment="Center" Foreground="{DynamicResource FaintBrush}"
                            TextTrimming="CharacterEllipsis" />
             </Grid>
 
-            <Border Grid.Row="1" Background="#FF12161F" CornerRadius="8" Padding="4">
+            <Border Grid.Row="1" Background="{DynamicResource ChatBgBrush}" CornerRadius="8" Padding="4">
                 <ListBox x:Name="LogList"
                          ItemsSource="{Binding Log}"
                          ItemTemplate="{StaticResource LogEntryTemplate}"

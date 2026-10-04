@@ -65,4 +65,7 @@ public partial class RoomListWindow : Window
         if (dialog.ShowDialog() == true)
             _ = _vm.CreateAndJoinAsync(dialog.RoomName, dialog.Password);
     }
+
+    /// <summary>房间列表界面也能打开设置（外观主题等）。</summary>
+    private void Settings_OnClick(object sender, RoutedEventArgs e) => SettingsWindow.Open(this);
 }

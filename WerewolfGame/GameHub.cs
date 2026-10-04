@@ -132,7 +132,8 @@ public class GameHub : Hub
                 Ops.RoomList => HandleRoomList(),
                 Ops.CreateRoom => await HandleCreateRoomAsync(request.Payload),
                 Ops.JoinRoom => await HandleJoinRoomAsync(request.Payload),
-                Ops.LeaveRoom => await HandleLeaveRoomAsync(),
+                Ops.LeaveRoom => await HandleLeaveRoomAsync(request.Payload),
+                Ops.State => HandleState(),
                 Ops.Start => await HandleStartAsync(),
                 Ops.Night => HandleNight(request.Payload),
                 Ops.Vote => HandleVote(request.Payload),
@@ -265,20 +266,52 @@ public class GameHub : Hub
         };
     }
 
-    private async Task<RpcReply> HandleLeaveRoomAsync()
+    /// <summary>
+    /// 主动离开房间。房间内还有其他人时房主转让给下一位；
+    /// 房间已空时按 <see cref="LeaveRoomPayload.KeepRoom"/> 决定「保留」还是「关闭」。
+    /// </summary>
+    private async Task<RpcReply> HandleLeaveRoomAsync(JsonNode? payload)
     {
-        var (room, player) = _rooms.LeaveRoom(Context.ConnectionId);
+        var req = payload?.Deserialize<LeaveRoomPayload>(Json) ?? new LeaveRoomPayload();
+        var (room, player, newHost, roomClosed) = _rooms.LeaveRoom(Context.ConnectionId, req.KeepRoom);
+
+        if (room == null || player == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
+        bool removed = !room.IsRunning;
+        await room.BroadcastAsync(removed
+            ? $"❌ {player.Username} 离开了房间。"
+            : $"⚠️ {player.Username} 离开了房间（局内继续，可重新加入）。");
+
+        if (!string.IsNullOrEmpty(newHost))
+            await room.BroadcastAsync($"👑 {newHost} 成为新房主。");
+
+        if (roomClosed)
+            await room.BroadcastAsync("🚪 房间已关闭。");
+        else
+            await room.BroadcastStateAsync();
+
+        return RpcReply.Success(roomClosed ? "closed" : "left");
+    }
+
+    /// <summary>
+    /// 主动拉取一次「我视角的房间状态」。
+    /// 进房时的那次广播可能发生在新界面创建之前（界面还没订阅推送），
+    /// 因此界面打开后需要主动补一次初始状态，否则玩家列表 / 房主标识会一直是空的。
+    /// </summary>
+    private RpcReply HandleState()
+    {
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
         if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
 
-        if (player != null)
+        var dto = room.SnapshotFor(Context.ConnectionId);
+        if (dto == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
+        return new RpcReply
         {
-            bool removed = !room.IsRunning;
-            await room.BroadcastAsync(removed
-                ? $"❌ {player.Username} 离开了房间。"
-                : $"⚠️ {player.Username} 离开了房间（局内继续，可重新加入）。");
-            await room.BroadcastStateAsync();
-        }
-        return RpcReply.Success("left");
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(dto, Json)
+        };
     }
 
     private async Task<RpcReply> HandleStartAsync()
@@ -340,12 +373,12 @@ public class GameHub : Hub
 
     /// <summary>
     /// 断开清理顺序（见设计 §6）：
-    /// ① 移除会话密钥；② 脱离房间并清掉连接映射；③ 广播离开/掉线并刷新状态。
+    /// ① 移除会话密钥；② 脱离房间并清掉连接映射；③ 广播离开/掉线、房主转让并刷新状态。
     /// </summary>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _sessions.Remove(Context.ConnectionId);
-        var (room, player) = _rooms.LeaveByConnection(Context.ConnectionId);
+        var (room, player, newHost) = _rooms.LeaveByConnection(Context.ConnectionId);
 
         if (room != null && player != null)
         {
@@ -353,6 +386,10 @@ public class GameHub : Hub
             await room.BroadcastAsync(removed
                 ? $"❌ {player.Username} 离开了房间。"
                 : $"⚠️ {player.Username} 掉线了（可重新连接）。");
+
+            if (!string.IsNullOrEmpty(newHost))
+                await room.BroadcastAsync($"👑 {newHost} 成为新房主。");
+
             await room.BroadcastStateAsync();
         }
 

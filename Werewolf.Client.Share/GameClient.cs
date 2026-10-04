@@ -110,6 +110,12 @@ public sealed class GameClient : IAsyncDisposable
     /// <summary>当前房主用户名；未知时为空字符串。</summary>
     public string CurrentHostName => _hostName;
 
+    /// <summary>
+    /// 最近一次收到（或拉取到）的房间状态。
+    /// 供界面在「进房早于界面创建」时立即回填，避免出现空白的主界面。
+    /// </summary>
+    public GameStateDto? LastState { get; private set; }
+
     // ---------------- 事件（均在后台线程触发，订阅方需自行调度到 UI 线程） ----------------
 
     public event Action<string>? MessageReceived;
@@ -132,6 +138,8 @@ public sealed class GameClient : IAsyncDisposable
         _joined = false;
         _cipher = null;
         _reconnecting = false;
+        IsManuallyClosed = false;
+        LastState = null;
 
         // 明文 HTTP 传输：机密性由应用层的“PSK 认证 DH 握手 + AES-GCM”保证，而非 TLS。
         _conn = new HubConnectionBuilder()
@@ -154,6 +162,7 @@ public sealed class GameClient : IAsyncDisposable
             _joined = false;
             _cipher = null;
             LastLatencyMs = -1;
+            LastState = null;
             StatusChanged?.Invoke("连接中断，正在重连…");
             return Task.CompletedTask;
         };
@@ -203,6 +212,7 @@ public sealed class GameClient : IAsyncDisposable
             _joined = false;
             _cipher = null;
             LastLatencyMs = -1;
+            LastState = null;
             ConnectionClosed?.Invoke(ex);
             return Task.CompletedTask;
         };
@@ -218,6 +228,7 @@ public sealed class GameClient : IAsyncDisposable
         _cipher = null;
         _loggedIn = false;
         _joined = false;
+        LastState = null;
         IsManuallyClosed = true;
         StatusChanged?.Invoke("已断开连接");
     }
@@ -318,9 +329,13 @@ public sealed class GameClient : IAsyncDisposable
     }
 
     /// <summary>离开当前房间（不拆连接）；成功后清空内存中的房间号与密码。</summary>
-    public async Task<JoinResult> LeaveRoomAsync()
+    /// <param name="keepRoom">
+    /// 仅当自己是房主且房间内已无其他人时生效：<c>true</c> 保留房间（一直存在到服务器退出），
+    /// <c>false</c> 由服务端立即关闭房间。房间内还有其他人时该参数无意义（房主会转让给下一位）。
+    /// </param>
+    public async Task<JoinResult> LeaveRoomAsync(bool keepRoom = false)
     {
-        var reply = await CallAsync(Ops.LeaveRoom);
+        var reply = await CallAsync(Ops.LeaveRoom, Node(new LeaveRoomPayload { KeepRoom = keepRoom }));
         var res = new JoinResult { ok = reply.Ok, msg = reply.Msg };
         if (res.ok)
         {
@@ -329,9 +344,56 @@ public sealed class GameClient : IAsyncDisposable
             _roomPassword = null;
             _roomName = "";
             _hostName = "";
+            LastState = null;
         }
         return res;
     }
+
+    // ---------------- 邀请码 ----------------
+
+    /// <summary>生成当前房间的邀请码（含服务器地址与房间密码）；不在房间时返回 null。</summary>
+    public string? CreateInviteCode()
+        => string.IsNullOrEmpty(_roomId)
+            ? null
+            : InviteCode.Create(Endpoint, _roomId, _roomPassword, _roomName);
+
+    /// <summary>解析邀请码（静态便捷入口，供界面在未连接时预览）。</summary>
+    public static bool TryParseInvite(string? code, out InvitePayload? invite, out string error)
+        => InviteCode.TryParse(code, out invite, out error);
+
+    /// <summary>
+    /// 用邀请码快速进房。码里已包含服务器地址、房间号与房间密码：
+    /// 若当前不在该服务器上，会先切换到码中的地址并用内存中的账号重新登录，再进房。
+    /// 注意：邀请码不含账号，调用方必须先完成登录（或本客户端此前已登录过）。
+    /// </summary>
+    public async Task<RoomResult> JoinByInviteAsync(InvitePayload invite)
+    {
+        if (invite == null || string.IsNullOrWhiteSpace(invite.RoomId))
+            return new RoomResult(false, "邀请码内容不完整。", "", false);
+
+        var target = (invite.Url ?? "").Trim();
+        if (target.Length == 0)
+            return new RoomResult(false, "邀请码缺少服务器地址。", "", false);
+
+        // 没连或连的不是同一台服务器 → 先切到码里的地址并重新登录（账号在内存里）。
+        if (!IsConnected || !SameEndpoint(Endpoint, target))
+        {
+            await ConnectAsync(target);
+
+            if (!string.IsNullOrEmpty(_username))
+            {
+                var login = await LoginAsync(_username, _password);
+                if (!login.ok) return new RoomResult(false, "在该服务器登录失败：" + login.msg, "", false);
+            }
+        }
+
+        return await JoinRoomAsync(invite.RoomId, invite.Password);
+    }
+
+    /// <summary>比较两个服务器地址是否指向同一端点（忽略大小写与结尾斜杠）。</summary>
+    private static bool SameEndpoint(string a, string b)
+        => string.Equals((a ?? "").Trim().TrimEnd('/'), (b ?? "").Trim().TrimEnd('/'),
+                         StringComparison.OrdinalIgnoreCase);
 
     /// <summary>把创建 / 加入房间的响应落到本地状态。</summary>
     private RoomResult ApplyRoomReply(RpcReply reply)
@@ -466,11 +528,7 @@ public sealed class GameClient : IAsyncDisposable
             {
                 case PushTypes.State:
                     var state = push.Payload?.Deserialize<GameStateDto>(JsonOptions);
-                    if (state != null)
-                    {
-                        SyncRoomFromState(state);
-                        StateReceived?.Invoke(state);
-                    }
+                    if (state != null) ApplyState(state);
                     break;
 
                 case PushTypes.Message:
@@ -483,6 +541,30 @@ public sealed class GameClient : IAsyncDisposable
         {
             MessageReceived?.Invoke("⚠️ 无法解密服务器消息：" + ex.Message);
         }
+    }
+
+    /// <summary>
+    /// 主动拉取一次「我视角的房间状态」并触发 <see cref="StateReceived"/>。
+    /// 进房（createroom / joinroom）时服务器会广播一次状态，但那一刻新界面往往还没创建、
+    /// 因此没人接收；界面打开后调用它补齐初始状态（玩家列表 / 房主标识 / 阶段都靠它）。
+    /// 不在房间时返回 null。
+    /// </summary>
+    public async Task<GameStateDto?> RefreshStateAsync()
+    {
+        var reply = await CallAsync(Ops.State);
+        if (!reply.Ok) return null;
+
+        var state = reply.Payload?.Deserialize<GameStateDto>(JsonOptions);
+        if (state != null) ApplyState(state);
+        return state;
+    }
+
+    /// <summary>把一份状态落到本地记忆并通知订阅者。</summary>
+    private void ApplyState(GameStateDto state)
+    {
+        LastState = state;
+        SyncRoomFromState(state);
+        StateReceived?.Invoke(state);
     }
 
     /// <summary>用状态推送里的房间信息同步本地记忆（房间号为空时不覆盖，兼容旧服务端）。</summary>

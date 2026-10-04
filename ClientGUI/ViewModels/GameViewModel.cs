@@ -115,6 +115,11 @@ public sealed class GameViewModel : ObservableObject
         ConnectionStatus = _client.IsJoined ? "已加入房间"
             : _client.IsConnected ? "已连接服务器"
             : "未连接";
+
+        // 进房（createroom / joinroom）早于本界面创建时，服务器那次状态广播没人接收，
+        // 这里先用客户端缓存的状态回填一次，界面打开时就不会是空的；
+        // 若缓存也没有，OnLoaded 会主动向服务器拉取（见 RefreshStateAsync）。
+        if (_client.LastState != null) OnStateReceived(_client.LastState);
     }
 
     /// <summary>把回调切到 UI 线程执行。</summary>
@@ -428,6 +433,30 @@ public sealed class GameViewModel : ObservableObject
     /// <summary>状态栏右下角的版本标识（与「关于」窗口同源）。</summary>
     public string VersionText => $"客户端 GUI · v{AppInfo.Version}";
 
+    // ==================== 邀请码 / 房间保留 ====================
+
+    /// <summary>生成当前房间的邀请码（含服务器地址与房间密码）；不在房间时返回 null。</summary>
+    public string? GenerateInviteCode() => _client.CreateInviteCode();
+
+    /// <summary>
+    /// 是否需要询问「是否保留房间」：本人是房主、已进房，且房间内没有其他玩家。
+    /// 房间内还有其他人时会自动把房主转让给下一位，无需询问。
+    /// </summary>
+    public bool NeedsKeepRoomDecision => IsJoined && IsHost && !Players.Any(p => !p.IsYou);
+
+    /// <summary>
+    /// 房主退出房间时是否需要「是否保留房间」的询问，以及询问结果。
+    /// 仅在「本人是房主 + 已进房 + 房间内没有其他玩家」时询问；未注入询问（非 GUI 宿主）按「不保留」处理。
+    /// </summary>
+    public bool ResolveKeepRoom()
+        => NeedsKeepRoomDecision && (ConfirmKeepRoom?.Invoke() ?? false);
+
+    /// <summary>
+    /// 房主退出且房间内没有其他人时，由视图注入「是否保留房间」的询问（true = 保留）。
+    /// 未注入（例如非 GUI 宿主）时按「不保留」处理。
+    /// </summary>
+    public Func<bool>? ConfirmKeepRoom { get; set; }
+
     // ==================== 退出房间 ====================
 
     private async Task LeaveRoomAsync()
@@ -435,10 +464,13 @@ public sealed class GameViewModel : ObservableObject
         _heartbeat.Stop();
         _countdown.Stop();
 
+        // 房主退出且房间内没有其他人时，询问是否保留房间（仅 GUI 提供该交互）。
+        var keepRoom = ResolveKeepRoom();
+
         // 只离开房间，不拆连接（连接由房间列表窗口继续复用）。
         try
         {
-            var res = await _client.LeaveRoomAsync();
+            var res = await _client.LeaveRoomAsync(keepRoom);
             if (!res.ok)
             {
                 AddLog("⚠️ 退出房间失败：" + res.msg, LogKinds.Error);
@@ -479,8 +511,10 @@ public sealed class GameViewModel : ObservableObject
 
         IsConnected = _client.IsConnected;
         ConnectionStatus = "已离开房间";
-        LogStatus = "已退出房间。";
-        AddLog("🚪 已退出房间，返回房间列表。");
+        LogStatus = keepRoom ? "已退出房间（房间已保留）。" : "已退出房间。";
+        AddLog(keepRoom
+            ? "🚪 已退出房间，房间已保留（可在房间列表重新进入）。"
+            : "🚪 已退出房间，返回房间列表。");
 
         RoomLeft?.Invoke();
     }
@@ -622,6 +656,9 @@ public sealed class GameViewModel : ObservableObject
         if (!string.IsNullOrEmpty(s.RoomId)) RoomId = s.RoomId;
         RoomName = s.RoomName;
         HostName = s.HostName;
+
+        // 收到带房间号的状态即确认「已在房间」——不依赖构造时机，避免进房早于界面创建时判断失准。
+        if (!string.IsNullOrEmpty(s.RoomId)) IsJoined = true;
 
         RefreshPlayers();
         RefreshActions();
@@ -919,6 +956,25 @@ public sealed class GameViewModel : ObservableObject
 
         // 进入主窗口后开始心跳（此时必然已连接）。
         if (IsConnected) _heartbeat.Start();
+
+        // 主动补一次房间状态：进房广播可能早于本界面创建（那时没人接收），
+        // 不补的话玩家列表、房主标识、开始游戏按钮都会是空的。
+        _ = RefreshStateAsync();
+    }
+
+    /// <summary>向服务器拉取一次当前房间状态（失败只记录，不影响使用）。</summary>
+    private async Task RefreshStateAsync()
+    {
+        if (!IsJoined) return;
+
+        try
+        {
+            await _client.RefreshStateAsync();
+        }
+        catch (Exception ex)
+        {
+            LogStatus = "刷新房间状态失败：" + ex.Message;
+        }
     }
 
     /// <summary>窗口关闭时尽力断开连接。</summary>

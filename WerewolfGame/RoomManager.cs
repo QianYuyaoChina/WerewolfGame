@@ -132,11 +132,56 @@ public sealed class RoomManager
         return (true, reconnected ? "reconnected" : "joined", roomId, reconnected);
     }
 
-    /// <summary>主动离开房间（保留账号身份，连接不断）。返回 (房间, 玩家) 供上层广播。</summary>
-    public (GameRoom? room, Player? player) LeaveRoom(string connId) => Detach(connId);
+    /// <summary>
+    /// 主动离开房间（保留账号身份，连接不断）。
+    /// <paramref name="keepRoom"/> 仅在「自己是房主且房间已无其他成员」时生效：
+    /// true → 把房间标记为保留（不参与回收）；false → 立即关闭并移除房间。
+    /// 房间内还有其他成员时，房主会转让给下一位，房间始终保留。
+    /// </summary>
+    /// <returns>(房间, 玩家, 新房主用户名, 房间是否已被关闭) 供上层广播。</returns>
+    public (GameRoom? room, Player? player, string newHost, bool roomClosed)
+        LeaveRoom(string connId, bool keepRoom = false)
+    {
+        var room = GetRoomByConnection(connId);
+        if (room == null)
+        {
+            Detach(connId);   // 清理可能残留的映射
+            return (null, null, "", false);
+        }
 
-    /// <summary>连接断开：脱离房间并清掉「连接 → 账号」映射。返回 (房间, 玩家) 供上层广播。</summary>
-    public (GameRoom? room, Player? player) LeaveByConnection(string connId)
+        var player = room.GetPlayer(connId);
+        var (detached, _, newHost) = Detach(connId);
+        if (detached == null) return (null, null, "", false);
+
+        // 房间已空：由房主当时的意愿决定「保留」还是「关闭」。
+        if (detached.PlayerCount == 0)
+        {
+            if (keepRoom)
+            {
+                detached.Persistent = true;
+                return (detached, player, "", false);
+            }
+
+            CloseRoom(detached.Id);
+            return (detached, player, "", true);
+        }
+
+        return (detached, player, newHost, false);
+    }
+
+    /// <summary>关闭并移除房间（同时清理可能残留的「连接 → 房间」映射）。</summary>
+    public bool CloseRoom(string roomId)
+    {
+        if (string.IsNullOrEmpty(roomId) || !_rooms.TryRemove(roomId, out _)) return false;
+
+        foreach (var mapping in _connRoom)
+            if (mapping.Value == roomId) _connRoom.TryRemove(mapping.Key, out _);
+
+        return true;
+    }
+
+    /// <summary>连接断开：脱离房间并清掉「连接 → 账号」映射。返回 (房间, 玩家, 新房主) 供上层广播。</summary>
+    public (GameRoom? room, Player? player, string newHost) LeaveByConnection(string connId)
     {
         var result = Detach(connId);
         _connUser.TryRemove(connId, out _);
@@ -145,6 +190,7 @@ public sealed class RoomManager
 
     /// <summary>
     /// 回收超宽限期的空房（无在线玩家）。返回回收数量。
+    /// 被标记为「保留」的房间永不回收，一直存在到服务器退出。
     /// </summary>
     public int RecycleExpired()
     {
@@ -155,6 +201,7 @@ public sealed class RoomManager
         foreach (var kv in _rooms)
         {
             var room = kv.Value;
+            if (room.Persistent) continue;
             if (room.ConnectedCount != 0) continue;
 
             var emptySince = room.EmptySince;
@@ -174,19 +221,22 @@ public sealed class RoomManager
 
     // ==================== 内部 ====================
 
-    /// <summary>把连接从当前房间摘除（房间内标记断线 / 未开局则移出名单），并清理映射。</summary>
-    private (GameRoom? room, Player? player) Detach(string connId)
+    /// <summary>
+    /// 把连接从当前房间摘除（房间内标记断线 / 未开局则移出名单），并清理映射。
+    /// 返回 (房间, 玩家, 新房主用户名)。
+    /// </summary>
+    private (GameRoom? room, Player? player, string newHost) Detach(string connId)
     {
         if (string.IsNullOrEmpty(connId) || !_connRoom.TryRemove(connId, out var roomId))
-            return (null, null);
+            return (null, null, "");
 
         var room = Find(roomId);
-        if (room == null) return (null, null);
+        if (room == null) return (null, null, "");
 
         var player = room.GetPlayer(connId);
-        room.OnDisconnected(connId);
+        var newHost = room.OnDisconnected(connId);
         room.TouchOccupancy();
-        return (room, player);
+        return (room, player, newHost);
     }
 
     /// <summary>若连接已映射到别的房间，先摘除旧房间映射（保留账号身份）。</summary>

@@ -23,6 +23,9 @@ public class GameRoom
     /// <summary>无在线玩家起始时间（UTC）；有在线玩家为 null，用于宽限期回收判定。</summary>
     private DateTime? _emptySince;
 
+    /// <summary>是否为「保留房间」：无人也不被回收，一直存在到服务器退出。</summary>
+    private bool _persistent;
+
     private Phase _phase = Phase.Waiting;
     private int _day;
     private volatile bool _running;
@@ -92,6 +95,16 @@ public class GameRoom
     /// <summary>无在线玩家的起始时间（UTC）；有在线玩家时为 null。</summary>
     public DateTime? EmptySince { get { lock (_sync) return _emptySince; } }
 
+    /// <summary>
+    /// 是否为「保留房间」：房主在房间空无一人时选择保留，房间将一直存在到服务器退出
+    /// （不参与宽限期回收）。一旦有新玩家加入并再次成为房主，语义不变——是否保留只由房主退出时决定。
+    /// </summary>
+    public bool Persistent
+    {
+        get { lock (_sync) return _persistent; }
+        set { lock (_sync) _persistent = value; }
+    }
+
     public bool IsRunning { get { lock (_sync) return _running; } }
     public Phase Phase { get { lock (_sync) return _phase; } }
 
@@ -119,6 +132,23 @@ public class GameRoom
         lock (_sync)
             return _players.FirstOrDefault(p =>
                 string.Equals(p.Username, username, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 取某个连接视角下的当前状态快照；该连接不在本房间时返回 null。
+    /// 供「主动拉取状态」使用（进房广播早于新界面创建时，用它补齐初始状态）。
+    /// </summary>
+    public GameStateDto? SnapshotFor(string connId)
+    {
+        lock (_sync)
+        {
+            if (string.IsNullOrEmpty(connId)) return null;
+
+            var viewer = _players.FirstOrDefault(p => p.ConnectionId == connId);
+            if (viewer == null) return null;
+
+            return BuildStateFor(viewer, _players.ToList(), _phase, _day, _running, _actingRole, _rules, Id, Name);
+        }
     }
 
     /// <summary>生成房间列表摘要。</summary>
@@ -187,23 +217,35 @@ public class GameRoom
         }
     }
 
-    public void OnDisconnected(string connId)
+    /// <summary>
+    /// 连接离开房间：未开局时把玩家移出名单，开局中只标记断线（局内继续）。
+    /// 若离开者正是房主且房间内还有成员，则按**加入顺序**把房主让给下一位
+    /// （优先让给仍在线的成员，避免房主落在一个掉线玩家身上导致房间无法开局）。
+    /// </summary>
+    /// <returns>新房主的用户名；没有发生转让时返回空字符串。</returns>
+    public string OnDisconnected(string connId)
     {
         lock (_sync)
         {
             var p = _players.FirstOrDefault(x => x.ConnectionId == connId);
-            if (p == null) return;
+            if (p == null) return "";
 
             p.IsConnected = false;
             p.ConnectionId = "";
 
             // 游戏未运行时，直接踢出列表
-            if (!_running)
-            {
-                _players.Remove(p);
-                if (p.IsHost && _players.Count > 0)
-                    _players[0].IsHost = true;
-            }
+            if (!_running) _players.Remove(p);
+
+            if (!p.IsHost) return "";
+
+            // 按加入顺序找下一位：先找最早加入且仍在线的，其次找最早加入的。
+            var next = _players.FirstOrDefault(x => x.IsConnected && !string.IsNullOrEmpty(x.ConnectionId))
+                       ?? _players.FirstOrDefault();
+            if (next == null) return "";
+
+            foreach (var q in _players) q.IsHost = false;
+            next.IsHost = true;
+            return next.Username;
         }
     }
 

@@ -42,6 +42,7 @@ namespace ClientGUI
         /// <summary>
         /// 房间列表 → 主窗口循环：退出房间回到房间列表（连接不拆）；
         /// 关闭任一窗口则退出程序。退出程序前统一释放连接。
+        /// 若登录时已通过邀请码直接进房，则跳过房间列表直接进主窗口。
         /// </summary>
         private void RunRoomLoop(GameClient session)
         {
@@ -49,8 +50,11 @@ namespace ClientGUI
             {
                 while (true)
                 {
-                    var list = new RoomListWindow(session);
-                    if (list.ShowDialog() != true) break;   // 关闭房间列表 → 退出程序
+                    if (!session.IsJoined)   // 邀请码可能已经把我们带进房间了
+                    {
+                        var list = new RoomListWindow(session);
+                        if (list.ShowDialog() != true) break;   // 关闭房间列表 → 退出程序
+                    }
 
                     var main = new MainWindow(session);
                     main.ShowDialog();

@@ -78,6 +78,20 @@ if (reconnectIndex >= 0)
     return await ReconnectProbe.RunAsync(url, seconds);
 }
 
+// 房主交接 / 房间保留 / 邀请码：--hostinvite <url>
+var hostInviteIndex = Array.IndexOf(args, "--hostinvite");
+if (hostInviteIndex >= 0)
+{
+    var url = hostInviteIndex + 1 < args.Length ? args[hostInviteIndex + 1] : DefaultUrl;
+    Console.WriteLine($"════════ 房主交接 / 保留房间 / 邀请码（{url}） ════════");
+    var hostInvite = await HostInviteProbe.RunAsync(url);
+    Console.WriteLine();
+    foreach (var note in hostInvite.Notes) Console.WriteLine("   " + note);
+    Console.WriteLine();
+    Console.WriteLine(hostInvite.Ok ? "✅ 通过" : "❌ 存在问题");
+    return hostInvite.Ok ? 0 : 1;
+}
+
 // 端到端联调：--server <url>
 var serverIndex = Array.IndexOf(args, "--server");
 if (serverIndex >= 0 && serverIndex + 1 < args.Length)

@@ -753,3 +753,53 @@ QA 报告 `HandleRoomList()`（`WerewolfGame/GameHub.cs`）未做登录校验，
 - `dotnet ClientGUI.Tests.dll --lifecycle <url>` → **15 项**通过（结束重置 / 空房回收 / 房间上限，QA 新增）
 - `dotnet ClientGUI.Tests.dll --reconnect <url>` → 通过（重连回到原房间）
 
+---
+
+## 12. 增量变更：房主交接 / 房间保留 / 邀请码（lead，2026-10-04）
+
+### 12.1 房主退出房间
+| 场景 | 行为 |
+|------|------|
+| 房间内还有成员 | 房主按**加入顺序**转让给下一位（优先选仍在线的成员，避免房主落到掉线玩家身上）；广播「👑 X 成为新房主」；房间保留 |
+| 房间内没有其他成员 + 选择「保留」 | `GameRoom.Persistent = true`，房间留在列表（记录为 **人数 0 / 房主为空**），**不参与宽限期回收**，一直存在到服务器退出 |
+| 房间内没有其他成员 + 选择「不保留」 | `RoomManager.CloseRoom(roomId)` 立即移除房间并清理连接映射，`leaveroom` 返回 `Msg="closed"` |
+
+- 掉线（`OnDisconnectedAsync`）走同一条转让逻辑：**对局中掉线仍保留在名单**，但房主同样转让。
+- 「是否保留房间」（`KeepRoom`，见 `LeaveRoomPayload`）仅在「自己是房主且房间已空」时有意义；
+  GUI 弹 `Views/KeepRoomWindow`（关闭窗口 / Esc 视为「保留」，避免误删），控制台固定按「不保留」处理（需求限定弹窗仅 GUI）。
+- 空房的**宽限期回收**仍只针对掉线留下的房间；主动退出且不保留是「立即关闭」，两者不冲突。
+
+### 12.2 邀请码
+- 新增 `Werewolf.Client.Share/InviteCode.cs`：`InvitePayload{Url, RoomId, Password?, RoomName?}` +
+  `Create` / `TryParse` / `LooksLikeCode`；线格式 `WW1:` + Base64Url( nonce | tag | ciphertext )，AES-GCM 复用 `SessionCipher`。
+- 密钥由预共享密钥派生（`HKDF(PSK, info="werewolf-invite-v1")`）→ **只在同一部署内互通**，且码内**不含账号**，拿码者仍需自己登录，房主身份不会被冒领。
+- 客户端 API：`GameClient.CreateInviteCode()`（房内生成，密码取自内存 `_roomPassword`）、
+  静态 `TryParseInvite`、`JoinByInviteAsync(InvitePayload)`（地址不同则自动切换服务器 + 重新登录 + 进房）。
+- 入口：GUI 主窗口「游戏 → 生成邀请码」（Ctrl+I，自动复制剪贴板）、登录窗口与房间列表窗口的邀请码输入框；
+  控制台：启动时可直接粘贴邀请码当地址、房间列表 `j`、房内 `invite`。
+- **服务端零改动**：邀请码只是把密码安全地送到客户端，`joinroom` 的密码校验链路完全不变。
+
+### 12.3 验收证据（本次增量）
+- `dotnet build WerewolfGame.sln` → 0 警告 0 错误
+- `dotnet ClientGUI.Tests.dll` → **493 项**断言全通过（新增 房主转让 / 保留与关闭 / 邀请码 共 63 项）
+- `--ui` → **13 项**通过（新增 `KeepRoomWindow` 实例化）
+- `--hostinvite <url>` → **17 项**全通过（新建探针 `HostInviteProbe`：邀请码免密进房、房主转让、最后一人关闭房间、保留房仍在列表）
+- 回归：`--rooms` 62 项、`--server` 23 项、`--reconnect` 通过
+
+### 12.4 修复记录（v1.5.1）
+
+| # | 现象 | 根因 | 修法 |
+|---|------|------|------|
+| 1 | 主界面玩家列表为空、不显示房主、房主看不到「开始游戏」 | **进房早于界面创建**：`createroom`/`joinroom` 时服务器广播的那份状态发生时界面还没订阅，之后若房间再无事件就永远收不到初始状态 → `IsHost` 恒为 false、`Players` 为空 | 新增 `Ops.State`（`roomstate`）+ `GameRoom.SnapshotFor(connId)` + `GameClient.RefreshStateAsync()`；主界面构造时用 `GameClient.LastState` 即时回填，`OnLoaded` 再主动拉一次 |
+| 2 | 房主独自退房不弹「是否保留房间」 | ① 的同源后果（`IsHost` 为 false，短路求值使询问根本不被调用） | 同上；另外 `OnStateReceived` 在拿到带房间号的状态时补 `IsJoined = true`，并抽出 `ResolveKeepRoom()` 便于回归测试 |
+| 3 | 邀请码复制不成功、弹窗里文字无法选中 | 剪贴板是全局独占资源，被占用时抛 `CLIPBRD_E_CANT_OPEN (0x800401D0)`；而 `MessageBox` 内容无法用鼠标选中 | 新增 `Views/InviteCodeWindow`（只读但**可选中**的文本框 + 复制按钮）取代弹窗；新增 `Services/ClipboardHelper.TrySetText`（6 次重试），失败时明确提示「Ctrl+A 全选 → Ctrl+C」 |
+
+**排查要点（可复用）**：客户端的**初始状态**不能依赖「服务器在进房时推一次」——那一次推送的时机早于新界面创建。
+凡是「离开某界面后再进入」的流程，新界面都必须能**主动拉取**或用**客户端缓存**回填，否则会出现难以复现的空白界面。
+
+**验收**：`dotnet ClientGUI.Tests.dll` 503 项、`--ui` 15 项、`--hostinvite` 19 项、
+`--rooms` 62 项、`--server` 通过、`--reconnect` 通过。其中 `--hostinvite` 新增断言
+「进房后主动拉取到初始状态且房主标识正确」，直接锁死 ① 的回归。
+
+
+

@@ -35,6 +35,7 @@ public sealed class RoomListViewModel : ObservableObject
 
     private RoomRow? _selectedRoom;
     private string _password = "";
+    private string _inviteCode = "";
     private string _status = "正在加载房间列表…";
     private bool _showError;
     private bool _isBusy;
@@ -49,6 +50,7 @@ public sealed class RoomListViewModel : ObservableObject
 
         RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync());
         JoinCommand = new AsyncRelayCommand(_ => JoinSelectedAsync(), _ => SelectedRoom != null && !IsBusy);
+        UseInviteCommand = new AsyncRelayCommand(_ => UseInviteAsync(), _ => !IsBusy);
     }
 
     // ==================== 集合与命令 ====================
@@ -57,6 +59,9 @@ public sealed class RoomListViewModel : ObservableObject
 
     public AsyncRelayCommand RefreshCommand { get; }
     public AsyncRelayCommand JoinCommand { get; }
+
+    /// <summary>用邀请码直接加入（邀请码里带了服务器地址与房间密码）。</summary>
+    public AsyncRelayCommand UseInviteCommand { get; }
 
     /// <summary>是否已成功进入房间（窗口据此关闭并交回控制权）。</summary>
     public bool EnteredRoom { get; private set; }
@@ -79,6 +84,9 @@ public sealed class RoomListViewModel : ObservableObject
     }
 
     public string Password { get => _password; set => Set(ref _password, value); }
+
+    /// <summary>邀请码输入（可选）：粘贴好友分享的码后点「加入」。</summary>
+    public string InviteCode { get => _inviteCode; set => Set(ref _inviteCode, value); }
 
     /// <summary>仅当选中的房间需要密码时启用密码框。</summary>
     public bool IsPasswordEnabled => SelectedRoom?.HasPassword == true;
@@ -229,6 +237,44 @@ public sealed class RoomListViewModel : ObservableObject
         catch (Exception ex)
         {
             SetError("创建失败：" + ex.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// 用邀请码快速加入：码里带服务器地址与房间密码，
+    /// 若当前连的不是同一台服务器，会自动切换并重新登录后进房。
+    /// </summary>
+    public async Task UseInviteAsync()
+    {
+        if (!GameClient.TryParseInvite(InviteCode, out var invite, out var error) || invite == null)
+        {
+            SetError(error);
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var rr = await _client.JoinByInviteAsync(invite);
+            if (!rr.Ok)
+            {
+                SetError(string.IsNullOrEmpty(rr.Message) ? "加入失败。" : rr.Message);
+                return;
+            }
+
+            ShowError = false;
+            Status = $"已通过邀请码加入房间 {rr.RoomId}。";
+            InviteCode = "";
+            EnteredRoom = true;
+            RoomEntered?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            SetError("加入失败：" + ex.Message);
         }
         finally
         {

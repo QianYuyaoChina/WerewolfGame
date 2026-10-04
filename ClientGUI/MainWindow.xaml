@@ -50,6 +50,9 @@
                     <MenuItem Header="开始游戏" InputGestureText="Ctrl+G"
                               Command="{Binding StartGameCommand}"
                               IsEnabled="{Binding CanStartGame}" />
+                    <MenuItem Header="生成邀请码" InputGestureText="Ctrl+I"
+                              Click="Menu_Invite_OnClick"
+                              IsEnabled="{Binding HasRoomInfo}" />
                     <Separator Style="{StaticResource MenuSeparator}" />
                     <MenuItem Header="退出房间" Command="{Binding DisconnectCommand}"
                               IsEnabled="{Binding CanLeaveRoom}" />

@@ -33,6 +33,7 @@ public static class AppInfo
         "AES-GCM (HKDF)",
         "规则可配置化",
         "心跳与自动重连",
+        "多房间与邀请码",
         "共享核心库"
     };
 

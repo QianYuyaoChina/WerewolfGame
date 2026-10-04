@@ -31,6 +31,13 @@ public static class Ops
 
     /// <summary>离开当前房间（不拆连接）。</summary>
     public const string LeaveRoom = "leaveroom";
+
+    /// <summary>
+    /// 主动拉取一次「我视角的房间状态」。
+    /// 房间状态平时靠服务器推送，但进房（createroom/joinroom）发生在新界面创建之前时，
+    /// 那次广播没人接收，新界面就会一直显示为空——用这个操作补一次初始状态。
+    /// </summary>
+    public const string State = "roomstate";
 }
 
 /// <summary>服务器推送类型（服务器 → 客户端）。</summary>
@@ -162,6 +169,16 @@ public sealed class JoinRoomPayload
 {
     public string RoomId { get; set; } = "";
     public string? Password { get; set; }
+}
+
+/// <summary>
+/// 离开房间。
+/// <c>KeepRoom=true</c> 且房间内没有其他人时，房间被标记为「保留」（一直存在到服务器退出）；
+/// 否则房间若已无人会被立即关闭。房间内还有其他成员时该字段无意义（房主会转让给下一位）。
+/// </summary>
+public sealed class LeaveRoomPayload
+{
+    public bool KeepRoom { get; set; }
 }
 
 // ---------------- 房间数据对象 ----------------

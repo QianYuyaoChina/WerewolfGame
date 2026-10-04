@@ -11,7 +11,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:RoomListViewModel}"
         Title="狼人杀 · 房间列表"
-        Height="600" Width="820" MinHeight="480" MinWidth="680"
+        Height="600" Width="960" MinHeight="480" MinWidth="760"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource BgBrush}"
         Foreground="{DynamicResource TextBrush}"
@@ -47,6 +47,14 @@
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <!-- 邀请码：粘贴后可直接进入对应房间（含密码） -->
+                <TextBlock Text="邀请码" Style="{StaticResource MutedText}" VerticalAlignment="Center"
+                           Margin="0,0,6,0" />
+                <TextBox x:Name="InviteCodeInput" Width="200" Style="{StaticResource FlatTextBox}"
+                         Text="{Binding InviteCode, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding IsIdle}" />
+                <Button Content="加入" Style="{StaticResource FlatButton}" Padding="12,7" Margin="6,0,12,0"
+                        Command="{Binding UseInviteCommand}" />
                 <Button Content="刷新" Style="{StaticResource FlatButton}" Padding="14,7" Margin="0,0,8,0"
                         Command="{Binding RefreshCommand}" IsEnabled="{Binding IsIdle}" />
                 <Button Content="创建房间" Style="{StaticResource PrimaryButton}" Padding="14,7"

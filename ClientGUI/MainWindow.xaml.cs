@@ -27,6 +27,9 @@ public partial class MainWindow : Window
         _vm = new GameViewModel(session);
         DataContext = _vm;
 
+        // 房主退出房间且房间内已无其他人时，由这里弹出「是否保留房间」。
+        _vm.ConfirmKeepRoom = AskKeepRoom;
+
         _vm.RoomLeft += OnRoomLeft;
 
         Loaded += OnLoaded;
@@ -138,6 +141,33 @@ public partial class MainWindow : Window
     /// <summary>退出程序：关闭全部窗口（会走 OnClosing 断开连接）。</summary>
     private void Menu_Exit_OnClick(object sender, RoutedEventArgs e) => RequestExit();
 
+    /// <summary>
+    /// 生成当前房间的邀请码：用**独立窗口**展示（而非弹窗）。
+    /// 弹窗里的文字无法用鼠标选中，一旦剪贴板复制失败就没法把码取出来；
+    /// 独立窗口里的文本框可选中，并自带「复制」按钮与重试。
+    /// </summary>
+    private void Menu_Invite_OnClick(object sender, RoutedEventArgs e) => ShowInviteCode();
+
+    private void ShowInviteCode()
+    {
+        var code = _vm.GenerateInviteCode();
+        if (string.IsNullOrEmpty(code))
+        {
+            MessageBox.Show("请先加入或创建一个房间，再生成邀请码。", "邀请码",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        new InviteCodeWindow(code) { Owner = this }.ShowDialog();
+    }
+
+    /// <summary>房主退出且房间内没有其他人时询问是否保留房间（关闭窗口视为保留）。</summary>
+    private bool AskKeepRoom()
+    {
+        var dialog = new KeepRoomWindow { Owner = this };
+        return dialog.ShowDialog() == true;
+    }
+
     // ==================== 菜单：视图 ====================
 
     /// <summary>三个面板开关共用一个处理器：统一按三个开关的当前状态重排布局。</summary>
@@ -179,7 +209,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 菜单里展示的 InputGestureText 只是“显示文本”，WPF 不会自动绑定按键，
-    /// 因此这里显式处理：F1 关于、Ctrl+Q 退出、Ctrl+L 清空消息、Ctrl+G 开始游戏。
+    /// 因此这里显式处理：F1 关于、Ctrl+Q 退出、Ctrl+L 清空消息、Ctrl+G 开始游戏、Ctrl+I 邀请码。
     /// </summary>
     private void MainWindow_OnKeyDown(object sender, KeyEventArgs e)
     {
@@ -187,6 +217,11 @@ public partial class MainWindow : Window
         {
             case Key.F1:
                 OpenAbout();
+                e.Handled = true;
+                break;
+
+            case Key.I when Keyboard.Modifiers == ModifierKeys.Control:
+                ShowInviteCode();
                 e.Handled = true;
                 break;
 

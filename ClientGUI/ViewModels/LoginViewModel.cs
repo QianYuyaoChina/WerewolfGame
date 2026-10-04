@@ -22,6 +22,9 @@ public sealed class LoginViewModel : ObservableObject
     private string _username = "";
     private string _password = "";
     private string _status = "填写服务器地址与账号后登录；登录后进入房间列表。";
+    private string _inviteCode = "";
+    private string _inviteHint = "";
+    private InvitePayload? _pendingInvite;
     private bool _isBusy;
     private bool _isLoggedIn;
     private bool _loginFailed;
@@ -38,6 +41,7 @@ public sealed class LoginViewModel : ObservableObject
         // 连接过程中的阶段提示（“已连接服务器”“正在重连…”），来自 SignalR 后台线程。
         _client.StatusChanged += status => OnUi(() => Status = status);
         LoginCommand = new AsyncRelayCommand(_ => LoginAsync());
+        UseInviteCommand = new RelayCommand(_ => ApplyInvite());
     }
 
     /// <summary>把回调切到 UI 线程执行。</summary>
@@ -51,6 +55,9 @@ public sealed class LoginViewModel : ObservableObject
     public GameClient Session => _client;
 
     public AsyncRelayCommand LoginCommand { get; }
+
+    /// <summary>解析邀请码（自动填好服务器地址，登录后直接进房）。</summary>
+    public RelayCommand UseInviteCommand { get; }
 
     /// <summary>登录成功后触发，把会话交给房间列表窗口。</summary>
     public event Action<GameClient>? LoginSucceeded;
@@ -78,6 +85,46 @@ public sealed class LoginViewModel : ObservableObject
     /// <summary>最近一次登录是否失败（用于在界面上把状态文案标红）。</summary>
     public bool ShowError { get => _loginFailed; private set => Set(ref _loginFailed, value); }
 
+    // ==================== 邀请码 ====================
+
+    /// <summary>邀请码输入（可选）：粘贴好友分享的邀请码后点「使用」。</summary>
+    public string InviteCode { get => _inviteCode; set => Set(ref _inviteCode, value); }
+
+    /// <summary>邀请码解析结果提示（识别成功 / 失败原因）。</summary>
+    public string InviteHint
+    {
+        get => _inviteHint;
+        private set
+        {
+            if (Set(ref _inviteHint, value)) OnPropertyChanged(nameof(HasInviteHint));
+        }
+    }
+
+    public bool HasInviteHint => _inviteHint.Length > 0;
+
+    /// <summary>已解析、待加入的房间（登录成功后自动进入，进入后清空）。</summary>
+    public InvitePayload? PendingInvite => _pendingInvite;
+
+    /// <summary>解析邀请码：自动填好服务器地址，并记住待加入的房间。</summary>
+    private void ApplyInvite()
+    {
+        if (!GameClient.TryParseInvite(InviteCode, out var invite, out var error) || invite == null)
+        {
+            _pendingInvite = null;
+            ShowError = true;
+            InviteHint = "⚠️ " + error;
+            return;
+        }
+
+        _pendingInvite = invite;
+        ServerUrl = invite.Url;   // 邀请码里带了服务器地址
+        ShowError = false;
+
+        var name = string.IsNullOrWhiteSpace(invite.RoomName) ? "" : $"（{invite.RoomName}）";
+        var lockText = invite.HasPassword ? "，房间密码已包含在邀请码中" : "";
+        InviteHint = $"✅ 邀请码有效：登录后将进入房间 {invite.RoomId}{name}{lockText}。";
+    }
+
     // ==================== 登录 ====================
 
     private async Task LoginAsync()
@@ -93,6 +140,19 @@ public sealed class LoginViewModel : ObservableObject
                 ShowError = true;
                 Status = result.Message;
                 return;
+            }
+
+            // 使用了邀请码：登录成功后直接进入对应房间（房间密码由邀请码携带，无需再输）。
+            if (_pendingInvite != null)
+            {
+                var rr = await _client.JoinByInviteAsync(_pendingInvite);
+                if (!rr.Ok)
+                {
+                    ShowError = true;
+                    Status = "进入房间失败：" + rr.Message;
+                    return;   // 停在登录窗口，让用户修改邀请码或稍后重试
+                }
+                _pendingInvite = null;
             }
 
             ShowError = false;

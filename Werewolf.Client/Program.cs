@@ -8,15 +8,34 @@ class Program
     static GameStateDto? _state;
     static GameClient _client = null!;
 
+    /// <summary>启动时若直接粘贴了邀请码，登录完成后用它直接进房（跳过房间列表）。</summary>
+    static InvitePayload? _pendingInvite;
+
     static async Task Main()
     {
         Console.OutputEncoding = Encoding.UTF8;
         Console.WriteLine("════════════ 狼人杀 ════════════");
 
-        // ① 输入服务器地址
-        Console.Write("请输入服务器地址（默认 http://localhost:5000/gamehub）：");
-        string url = Console.ReadLine()?.Trim() ?? "";
-        if (string.IsNullOrEmpty(url)) url = "http://localhost:5000/gamehub";
+        // ① 输入服务器地址（也支持直接粘贴邀请码）
+        Console.Write("请输入服务器地址（默认 http://localhost:5000/gamehub），或直接粘贴邀请码：");
+        string input = Console.ReadLine()?.Trim() ?? "";
+        string url;
+        if (InviteCode.LooksLikeCode(input))
+        {
+            if (!InviteCode.TryParse(input, out var invite, out var inviteError) || invite == null)
+            {
+                Print("❌ 邀请码无效：" + inviteError);
+                return;
+            }
+
+            url = invite.Url;
+            _pendingInvite = invite;
+            Print($"🎟 已识别邀请码：将连接 {url} 并在登录后进入房间 {invite.RoomId}。");
+        }
+        else
+        {
+            url = string.IsNullOrEmpty(input) ? "http://localhost:5000/gamehub" : input;
+        }
 
         // ② 连接：明文 HTTP 传输，连接后自动用快速幂 DH 协商会话密钥（应用层加密）
         _client = new GameClient();
@@ -41,6 +60,31 @@ class Program
 
         // ③ 输入用户名 / 密码并登录（首次即注册）；登录只做账号校验，不再直接进房。
         if (!await LoginAsync()) return;
+
+        // ③.5 启动时粘贴过邀请码 → 登录后直接进房（房间密码已由邀请码携带）
+        if (_pendingInvite != null)
+        {
+            var pending = _pendingInvite;
+            _pendingInvite = null;
+            try
+            {
+                var rr = await _client.JoinByInviteAsync(pending);
+                if (rr.Ok)
+                {
+                    Print($"🎟 已通过邀请码进入房间 {rr.RoomId}。");
+                    PrintHelp();
+                    await GameLoopAsync();     // leave 之后继续走下面的房间列表循环
+                }
+                else
+                {
+                    Print($"❌ 邀请码进房失败：{rr.Message}，已回到房间列表。");
+                }
+            }
+            catch (Exception ex)
+            {
+                Print($"❌ 邀请码进房失败：{ex.Message}，已回到房间列表。");
+            }
+        }
 
         // ④ 房间列表 → 加入 / 创建；进入房间后进入指令循环，leave 返回列表。
         while (true)
@@ -111,11 +155,17 @@ class Program
             PrintRoomList(rooms);
 
             Console.WriteLine();
-            Console.Write("输入序号加入 / 输入 c 创建房间 / 输入 r 刷新 / 输入 q 退出：\n> ");
+            Console.Write("输入序号加入 / j 用邀请码加入 / c 创建房间 / r 刷新 / q 退出：\n> ");
             string line = (Console.ReadLine() ?? "").Trim();
 
             if (line.Equals("q", StringComparison.OrdinalIgnoreCase)) return false;
             if (line.Equals("r", StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (line.Equals("j", StringComparison.OrdinalIgnoreCase))
+            {
+                if (await JoinByInviteFlowAsync()) return true;
+                continue;
+            }
 
             if (line.Equals("c", StringComparison.OrdinalIgnoreCase))
             {
@@ -129,7 +179,35 @@ class Program
                 continue;
             }
 
-            Print("⚠️ 无效输入，请输入序号 / c / r / q。");
+            Print("⚠️ 无效输入，请输入序号 / j / c / r / q。");
+        }
+    }
+
+    /// <summary>用邀请码加入：码里含服务器地址与房间密码，无需再输密码。</summary>
+    static async Task<bool> JoinByInviteFlowAsync()
+    {
+        Console.Write("邀请码：");
+        string code = (Console.ReadLine() ?? "").Trim();
+
+        if (!InviteCode.TryParse(code, out var invite, out var error) || invite == null)
+        {
+            Print("❌ " + error);
+            return false;
+        }
+
+        try
+        {
+            var rr = await _client.JoinByInviteAsync(invite);
+            if (!rr.Ok) { Print("❌ 加入失败：" + rr.Message); return false; }
+
+            Print($"🎟 已通过邀请码进入房间 {rr.RoomId}（密码已自动验证）。");
+            PrintHelp();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Print("❌ 加入失败：" + ex.Message);
+            return false;
         }
     }
 
@@ -221,6 +299,7 @@ class Program
             {
                 try
                 {
+                    // 控制台不做「是否保留房间」的询问：房主且房间只剩自己时按「不保留」处理（直接关闭房间）。
                     var res = await _client.LeaveRoomAsync();
                     Print(res.ok ? "🚪 已退出房间，返回房间列表。" : "⚠️ " + res.msg);
                 }
@@ -251,6 +330,20 @@ class Program
         if (line.StartsWith("chat ", StringComparison.OrdinalIgnoreCase))
         {
             await _client.ChatAsync(line[5..]);
+            return;
+        }
+        if (line.Equals("invite", StringComparison.OrdinalIgnoreCase))
+        {
+            var code = _client.CreateInviteCode();
+            if (string.IsNullOrEmpty(code))
+            {
+                Print("⚠️ 当前不在房间中，无法生成邀请码。");
+                return;
+            }
+
+            Print("──────── 邀请码（发给好友，对方粘贴后可直接进入本房间，无需输入密码）────────");
+            Print(code);
+            Print("──────────────────────────────────────────────────────");
             return;
         }
 
@@ -343,7 +436,9 @@ class Program
         Print(@"
 ──────────── 指令帮助 ────────────
   start              房主开始游戏
+  invite             生成邀请码（好友粘贴后可直接进本房间，含密码）
   leave              退出当前房间，返回房间列表
+                       （房主且房间只剩你时，会直接关闭该房间）
   数字 (如 3)        夜间选择目标 / 投票 / 猎人开枪
   -1                 弃票 / 放弃开枪
   chat 内容          发言
@@ -351,6 +446,13 @@ class Program
   poison 3           女巫毒杀 3 号
   none               女巫今晚不用药
   help               显示本帮助
+
+──────────── 房间列表 ────────────
+  序号 (如 2)        加入对应房间（加密房会要求输入密码）
+  j                  用邀请码加入（无需再输密码）
+  c                  创建房间（可设置密码）
+  r                  刷新列表
+  q                  退出程序
 
   掉线重连：重新启动本程序，输入服务器地址，
   再输入【相同】用户名 + 密码即可恢复原房间身份。

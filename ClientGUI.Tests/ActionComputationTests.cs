@@ -30,7 +30,8 @@ public static class ActionComputationTests
         int day = 1,
         int playerCount = 4,
         int[]? dead = null,
-        string? actingRole = null)
+        string? actingRole = null,
+        string roomId = "")
     {
         var players = new List<PlayerDto>();
         for (var i = 0; i < playerCount; i++)
@@ -56,6 +57,7 @@ public static class ActionComputationTests
             YourRoleDesc = "desc",
             IsAlive = isAlive,
             ActingRole = actingRole ?? "",
+            RoomId = roomId,
             Players = players
         };
     }
@@ -70,7 +72,43 @@ public static class ActionComputationTests
         PassivePhases();
         StateConsistency();
         RulesDrivenUi();
+        KeepRoomPrompt();
         await ConnectionFailureAsync();
+    }
+
+    // ==================== 房主退房询问（回归） ====================
+
+    /// <summary>
+    /// 回归：房主独自一人时点「退出房间」必须先询问是否保留房间。
+    /// 早期版本里主界面拿不到初始状态（进房广播早于界面创建），`IsHost` 一直是 false，
+    /// 于是既不显示房主标识，也永远不会弹询问。
+    /// </summary>
+    private static void KeepRoomPrompt()
+    {
+        // 房主独自一人 → 需要询问。
+        var host = Apply(State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 1, roomId: "ABCDE"));
+        Check.True(host.IsHost, "保留询问：单人房主被识别为房主");
+        Check.True(host.IsJoined, "保留询问：收到带房间号的状态即视为已在房间");
+        Check.True(host.NeedsKeepRoomDecision, "保留询问：房主独自一人时应询问");
+
+        var asked = false;
+        host.ConfirmKeepRoom = () => { asked = true; return true; };
+        Check.True(host.ResolveKeepRoom(), "保留询问：选择保留时判定为保留");
+        Check.True(asked, "保留询问：确实调用了询问");
+
+        // 未注入询问（非 GUI 宿主）时按「不保留」处理。
+        var noPrompt = Apply(State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 1, roomId: "ABCDE"));
+        Check.False(noPrompt.ResolveKeepRoom(), "保留询问：未注入询问时默认不保留");
+
+        // 房间里还有别人 → 不询问（房主会自动转让）。
+        var withOthers = Apply(State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 2, roomId: "ABCDE"));
+        Check.True(withOthers.IsHost, "保留询问：两人房由 0 号当房主");
+        Check.False(withOthers.NeedsKeepRoomDecision, "保留询问：房间内还有别人时不询问");
+
+        // 自己不是房主 → 不询问。
+        var guest = Apply(State(Phases.Waiting, Roles.Villager, yourId: 1, playerCount: 2, roomId: "ABCDE"));
+        Check.False(guest.IsHost, "保留询问：1 号不是房主");
+        Check.False(guest.NeedsKeepRoomDecision, "保留询问：非房主不询问");
     }
 
     // ==================== 规则驱动的界面（可配置化回归） ====================

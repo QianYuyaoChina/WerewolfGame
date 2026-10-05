@@ -142,6 +142,9 @@ GameRulesTests.RunAll();
 Console.WriteLine("════════ 新身份与房主设置校验 ════════");
 NewRolesTests.RunAll();
 
+Console.WriteLine("════════ 反作弊：服务端校验 ════════");
+AntiCheatTests.RunAll();
+
 Console.WriteLine("════════ 多房间纯逻辑校验 ════════");
 RoomTests.RunAll();
 

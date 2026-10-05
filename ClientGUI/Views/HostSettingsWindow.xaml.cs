@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using ClientGUI.Services;
 using ClientGUI.ViewModels;
 using Werewolf.Client.Share;
@@ -11,6 +13,13 @@ namespace ClientGUI.Views;
 /// 房主设置窗口：最大人数 / 房间密码 / 身份布局 / 邀请码。
 ///
 /// 只有房主可用（服务端对每个 op 都会再校验一次房主身份）。
+///
+/// 身份配置有两种模式：
+/// <list type="bullet">
+///   <item><b>跟随人数自动配置</b>（默认）：按当前人数套用内置布局（神职随人数递增），
+///         保存时下发"未自定义"，因此**房间里每进/退一人，开局时的配置都会自动跟着变**；</item>
+///   <item><b>手动配置</b>：用 −/+ 或直接输入数量；任何手动改动都会自动切到该模式。</item>
+/// </list>
 /// 邀请码区展示的是**邀请令牌**换来的码：修改房间密码不会让它失效，
 /// 只有点「重置邀请令牌」才会作废旧码。
 /// </summary>
@@ -21,19 +30,40 @@ public partial class HostSettingsWindow : Window
     private readonly GameClient _client;
     private readonly List<RoleCountRow> _rows = new();
 
+    /// <summary>窗口打开期间轮询房间设置，用于跟随人数变化（进/退人时自动重排身份）。</summary>
+    private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromSeconds(3) };
+
     private HostSettingsDto? _settings;
     private string _inviteToken = "";
     private int _playerCount;
+
+    /// <summary>程序化回填期间抑制控件事件（避免把"回填"当成"用户改动"）。</summary>
+    private bool _suppress;
 
     public HostSettingsWindow(GameClient client)
     {
         InitializeComponent();
 
         _client = client;
-
         BuildRows();
-        Loaded += async (_, _) => await ReloadAsync();
+
+        // 默认「跟随人数自动配置」。勾选状态在 InitializeComponent 之后再设置：
+        // 写在 XAML 里会在控件树尚未构建完成时触发 Checked，导致空引用。
+        _suppress = true;
+        AutoLayoutBox.IsChecked = true;
+        _suppress = false;
+
+        _poll.Tick += async (_, _) => await PollAsync();
+        Loaded += async (_, _) =>
+        {
+            await ReloadAsync();
+            _poll.Start();
+        };
+        Closed += (_, _) => _poll.Stop();
     }
+
+    /// <summary>是否处于「跟随人数自动配置」模式（复选框默认勾选）。</summary>
+    private bool AutoLayout => AutoLayoutBox.IsChecked != false;
 
     /// <summary>按统一的展示顺序创建「身份 + 数量」输入行。</summary>
     private void BuildRows()
@@ -63,36 +93,109 @@ public partial class HostSettingsWindow : Window
             return;
         }
 
-        _settings = result.Settings;
-        _inviteToken = result.Settings.InviteToken;
-        _playerCount = result.Settings.PlayerCount;
-
-        RoomText.Text = $"房间 {result.Settings.RoomId} · {result.Settings.RoomName} · " +
-                        $"当前 {result.Settings.PlayerCount} 人";
-
-        MaxPlayersInput.Text = result.Settings.MaxPlayers.ToString();
-        MaxPlayersHint.Text = result.Settings.Running
-            ? "游戏进行中，人数与身份配置暂不可修改（密码与邀请码仍可改）。"
-            : $"允许范围：{result.Settings.MinPlayers} - {result.Settings.MaxPlayersLimit} 人。";
-
-        ClearPasswordBox.IsChecked = false;
-        PasswordInput.Password = "";
-
-        ApplyLayoutFromSettings(result.Settings);
-        RefreshInviteCode();
-
+        ApplySettings(result.Settings);
         SaveButton.IsEnabled = true;
         SetStatus("已读取房间设置。修改后点「保存设置」。", error: false);
     }
 
-    private void ApplyLayoutFromSettings(HostSettingsDto settings)
+    /// <summary>
+    /// 完整回填（**只用于首次加载与保存之后**）：会覆盖输入框、密码框与勾选状态。
+    /// 轮询路径不要用这个 —— 见 <see cref="RefreshFromServerState"/>。
+    /// </summary>
+    private void ApplySettings(HostSettingsDto settings)
     {
-        // 房主自定义过就按自定义回填；否则显示「按当前人数推导的默认布局」，方便直接微调。
-        var layout = ParseLayout(settings.GameSettingsJson);
-        if (layout.Total == 0) layout = RoleLayout.Default(Math.Max(2, settings.PlayerCount));
+        _settings = settings;
+        _playerCount = settings.PlayerCount;
 
-        foreach (var row in _rows) row.SetCount(layout.Get(row.Role));
-        UpdateLayoutHint();
+        if (_inviteToken != settings.InviteToken)
+        {
+            _inviteToken = settings.InviteToken;
+            RefreshInviteCode();
+        }
+
+        RoomText.Text = HeaderText(settings);
+        MaxPlayersInput.Text = settings.MaxPlayers.ToString();
+        MaxPlayersHint.Text = MaxPlayersTip(settings);
+
+        ClearPasswordBox.IsChecked = false;
+        PasswordInput.Password = "";
+
+        // 房主自定义过 → 手动模式并回填；否则跟随人数自动配置。
+        _suppress = true;
+        AutoLayoutBox.IsChecked = !settings.CustomGameSettings;
+        _suppress = false;
+
+        if (settings.CustomGameSettings)
+        {
+            var layout = ParseLayout(settings.GameSettingsJson);
+            SetRows(layout.Total == 0 ? RoleLayout.Default(settings.PlayerCount) : layout);
+        }
+        else
+        {
+            SetRows(RoleLayout.Default(settings.PlayerCount));
+        }
+    }
+
+    /// <summary>
+    /// **只刷新只读展示**（房间信息 / 邀请码 / 人数变化引起的自动重排），
+    /// 绝不覆盖房主正在编辑的输入框（最大人数、密码）与勾选状态。
+    ///
+    /// 背景：窗口打开后会周期轮询房间设置；早期版本每轮都做完整回填，
+    /// 导致「改最大人数必须抢在 3 秒内点保存，否则数字被冲回旧值」。
+    /// </summary>
+    public void RefreshFromServerState(HostSettingsDto settings)
+    {
+        _settings = settings;
+
+        // 邀请令牌可能被别处重置：只在真的变了才刷新（避免打断输入框的选中）。
+        if (_inviteToken != settings.InviteToken)
+        {
+            _inviteToken = settings.InviteToken;
+            RefreshInviteCode();
+        }
+
+        RoomText.Text = HeaderText(settings);
+        MaxPlayersHint.Text = MaxPlayersTip(settings);
+
+        var countChanged = settings.PlayerCount != _playerCount;
+        _playerCount = settings.PlayerCount;
+
+        if (countChanged)
+        {
+            // 人数变化：自动模式跟着重排；手动模式只提示（不覆盖房主的自定义）。
+            if (AutoLayout) SetRows(RoleLayout.Default(_playerCount));
+            UpdateLayoutHint();
+        }
+    }
+
+    private static string HeaderText(HostSettingsDto s)
+        => $"房间 {s.RoomId} · {s.RoomName} · 当前 {s.PlayerCount} 人";
+
+    private static string MaxPlayersTip(HostSettingsDto s)
+        => s.Running
+            ? "游戏进行中，人数与身份配置暂不可修改（密码与邀请码仍可改）。"
+            : $"允许范围：{s.MinPlayers} - {s.MaxPlayersLimit} 人。";
+
+    /// <summary>窗口打开期间轮询：人数变化时（自动模式下）实时重排身份配置。</summary>
+    private async Task PollAsync()
+    {
+        if (_settings == null) return;
+
+        HostSettingsResult result;
+        try { result = await _client.GetHostSettingsAsync(); }
+        catch { return; }
+
+        if (!result.Ok || result.Settings == null) return;
+
+        var before = _playerCount;
+        // 注意：这里**只做非破坏性刷新**，不碰输入框（见 RefreshFromServerState 的注释）。
+        RefreshFromServerState(result.Settings);
+
+        if (_playerCount == before) return;
+
+        SetStatus(AutoLayout
+            ? $"人数变为 {_playerCount}，已按人数自动重排身份配置。"
+            : $"人数变为 {_playerCount}，身份总数需与其一致才能开局。", error: !AutoLayout);
     }
 
     private static RoleLayout ParseLayout(string? json)
@@ -109,16 +212,27 @@ public partial class HostSettingsWindow : Window
         return layout;
     }
 
+    /// <summary>回填各身份数量（抑制事件，避免被当成手动改动）。</summary>
+    private void SetRows(RoleLayout layout)
+    {
+        _suppress = true;
+        foreach (var row in _rows) row.SetCount(layout.Get(row.Role));
+        _suppress = false;
+        UpdateLayoutHint();
+    }
+
     private void UpdateLayoutHint()
     {
+        if (LayoutHint == null) return;   // 控件树尚未构建完成（InitializeComponent 期间）
+
         var layout = BuildLayout();
         var shape = layout.ValidateShape();
         var game = layout.ValidateForGame(_playerCount);
 
+        var mode = AutoLayout ? "跟随人数自动配置" : "手动配置";
         LayoutHint.Text = shape.ok && game.ok
-            ? $"共 {layout.Total} 个身份（当前 {_playerCount} 人）：{layout.Describe()}\n" +
-              "校验通过。如果不想自定义，把数量改回默认值即可自动跟随人数。"
-            : $"共 {layout.Total} 个身份（当前 {_playerCount} 人）。\n⚠️ {(game.ok ? shape.msg : game.msg)}";
+            ? $"（{mode}）共 {layout.Total} 个身份，当前 {_playerCount} 人：{layout.Describe()}"
+            : $"（{mode}）共 {layout.Total} 个身份，当前 {_playerCount} 人。\n⚠️ {(game.ok ? shape.msg : game.msg)}";
     }
 
     private void RefreshInviteCode()
@@ -127,25 +241,82 @@ public partial class HostSettingsWindow : Window
         InviteCodeBox.Text = code;
     }
 
-    // ==================== 交互 ====================
+    // ==================== 身份配置交互 ====================
+
+    private void AutoLayout_OnChanged(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+
+        if (AutoLayout)
+        {
+            SetRows(RoleLayout.Default(_playerCount));
+            SetStatus("已切换为「跟随人数自动配置」：房间里每进/退一人，开局时的身份配置会自动跟着变。", error: false);
+        }
+        else
+        {
+            UpdateLayoutHint();
+            SetStatus("已切换为手动配置：可以用 −/+ 或直接输入数量。", error: false);
+        }
+    }
+
+    private void Decrease_OnClick(object sender, RoutedEventArgs e) => Nudge(sender, -1);
+
+    private void Increase_OnClick(object sender, RoutedEventArgs e) => Nudge(sender, +1);
+
+    /// <summary>加减某个身份的数量；手动改动会切换到手动模式。</summary>
+    private void Nudge(object sender, int delta)
+    {
+        if ((sender as FrameworkElement)?.Tag is not RoleCountRow row) return;
+
+        SwitchToManual();
+        row.SetCount(Math.Max(0, row.Count + delta));
+        UpdateLayoutHint();
+    }
+
+    /// <summary>手动输入数量：清掉自动模式（否则下次轮询会把输入覆盖掉）。</summary>
+    private void Count_OnTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppress) return;
+        SwitchToManual();
+        UpdateLayoutHint();
+    }
+
+    private void SwitchToManual()
+    {
+        if (!AutoLayout) return;
+
+        _suppress = true;
+        AutoLayoutBox.IsChecked = false;
+        _suppress = false;
+        SetStatus("已切换为手动配置（取消勾选「跟随人数自动配置」）。", error: false);
+    }
+
+    private void ResetLayout_OnClick(object sender, RoutedEventArgs e)
+    {
+        _suppress = true;
+        AutoLayoutBox.IsChecked = true;
+        _suppress = false;
+
+        SetRows(RoleLayout.Default(_playerCount));
+        SetStatus($"已填入 {_playerCount} 人的默认布局（跟随人数自动配置），点「保存设置」生效。", error: false);
+    }
+
+    // ==================== 保存 / 邀请码 ====================
 
     private async void Save_OnClick(object sender, RoutedEventArgs e)
     {
         if (_settings == null) return;
 
-        // 人数
         if (!int.TryParse(MaxPlayersInput.Text.Trim(), out var maxPlayers))
         {
             SetStatus("最大人数必须是数字。", error: true);
             return;
         }
 
-        // 身份布局：与「按人数推导的默认布局」一致时发空串，表示跟随默认。
-        var layout = BuildLayout();
-        var isDefault = SameLayout(layout, RoleLayout.Default(Math.Max(2, _playerCount)));
-        var layoutJson = isDefault ? "" : JsonSerializer.Serialize(layout, Json);
+        // 自动模式下发空串（= 未自定义），服务端会按开局时的实际人数推导布局，
+        // 因此人数之后再变也不会失配；手动模式才下发具体的身份配比。
+        var layoutJson = AutoLayout ? "" : JsonSerializer.Serialize(BuildLayout(), Json);
 
-        // 密码
         var clear = ClearPasswordBox.IsChecked == true;
         var newPassword = PasswordInput.Password;
 
@@ -170,14 +341,6 @@ public partial class HostSettingsWindow : Window
                 : "✅ 已保存房间设置。", error: false);
 
         await ReloadAsync();
-    }
-
-    private void ResetLayout_OnClick(object sender, RoutedEventArgs e)
-    {
-        var layout = RoleLayout.Default(Math.Max(2, _playerCount));
-        foreach (var row in _rows) row.SetCount(layout.Get(row.Role));
-        UpdateLayoutHint();
-        SetStatus("已填入默认布局，点「保存设置」生效。", error: false);
     }
 
     private void CopyInvite_OnClick(object sender, RoutedEventArgs e)
@@ -217,16 +380,8 @@ public partial class HostSettingsWindow : Window
 
     private void SetStatus(string text, bool error)
     {
+        if (StatusText == null) return;   // 控件树尚未构建完成（InitializeComponent 期间）
         StatusText.Text = text;
         StatusText.Foreground = error ? UiBrushes.Warning : UiBrushes.Muted;
-    }
-
-    // ==================== 工具 ====================
-
-    private static bool SameLayout(RoleLayout a, RoleLayout b)
-    {
-        foreach (var role in Roles.DisplayOrder)
-            if (a.Get(role) != b.Get(role)) return false;
-        return true;
     }
 }

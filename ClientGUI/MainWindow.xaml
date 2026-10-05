@@ -53,8 +53,6 @@
                     <MenuItem Header="生成邀请码" InputGestureText="Ctrl+I"
                               Click="Menu_Invite_OnClick"
                               IsEnabled="{Binding HasRoomInfo}" />
-                    <MenuItem Header="房主设置…" Click="Menu_HostSettings_OnClick"
-                              IsEnabled="{Binding IsHost}" />
                     <Separator Style="{StaticResource MenuSeparator}" />
                     <MenuItem Header="退出房间" Command="{Binding DisconnectCommand}"
                               IsEnabled="{Binding CanLeaveRoom}" />
@@ -70,8 +68,6 @@
                     <MenuItem x:Name="MenuToggleActions" Header="操作面板"
                               IsCheckable="True" IsChecked="True" Click="Menu_TogglePanel_OnClick" />
                     <Separator Style="{StaticResource MenuSeparator}" />
-                    <MenuItem Header="设置…" InputGestureText="Ctrl+,"
-                              Click="Menu_Settings_OnClick" />
                     <MenuItem Header="清空消息" InputGestureText="Ctrl+L"
                               Command="{Binding ClearLogCommand}" IsEnabled="{Binding HasLog}" />
                 </MenuItem>
@@ -95,9 +91,22 @@
                                Foreground="{DynamicResource MutedBrush}" />
                 </StackPanel>
 
-                <!-- 当前局势 + 退出房间 -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
-                            Visibility="{Binding IsJoined, Converter={StaticResource BoolToVisibility}}">
+                <!--
+                    右上角统一放「设置」类入口（不再分散到「游戏 / 视图」两个菜单里）：
+                    · 设置：外观主题与主界面（Ctrl + ,）
+                    · 房主设置：房间人数 / 密码 / 身份配置 / 邀请码（仅房主可用）
+                    右侧的当前局势与「退出房间」只在进房后显示。
+                -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+
+                    <Button Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="12,6" Margin="0,0,8,0"
+                            Click="Menu_Settings_OnClick" ToolTip="外观与主界面设置（快捷键 Ctrl + ,）" />
+                    <Button Content="👑 房主设置" Style="{StaticResource FlatButton}" Padding="12,6" Margin="0,0,12,0"
+                            Click="Menu_HostSettings_OnClick" IsEnabled="{Binding IsHost}"
+                            ToolTip="房间人数 / 密码 / 身份配置 / 邀请码（仅房主）" />
+
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                Visibility="{Binding IsJoined, Converter={StaticResource BoolToVisibility}}">
                     <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
                             BorderThickness="1" BorderBrush="{DynamicResource AccentBrush}"
                             Visibility="{Binding HasRoomInfo, Converter={StaticResource BoolToVisibility}}">
@@ -127,6 +136,7 @@
                     <Button Content="退出房间" Style="{StaticResource FlatButton}" Padding="12,6"
                             Command="{Binding DisconnectCommand}"
                             IsEnabled="{Binding CanLeaveRoom}" />
+                    </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>

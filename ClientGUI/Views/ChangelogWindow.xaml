@@ -25,6 +25,21 @@
                 <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
+            <!--
+                版本徽章文字色跟随主题：非最新条目贴在 PanelAltBrush 上（浅色主题是浅底），
+                硬编码 White 会导致浅色模式下「白字白底」看不见。
+            -->
+            <Style x:Key="VersionBadgeText" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsLatest}" Value="True">
+                        <Setter Property="Foreground" Value="White" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
             <!-- 单条版本记录 -->
             <DataTemplate x:Key="ChangelogEntryTemplate" DataType="{x:Type m:ChangelogEntry}">
                 <Border Background="{DynamicResource CardBrush}" CornerRadius="8" Padding="16,14"
@@ -44,9 +59,8 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="v" FontSize="12" FontWeight="SemiBold" Foreground="White" />
-                                    <TextBlock Text="{Binding Version}" FontSize="12" FontWeight="SemiBold"
-                                               Foreground="White" />
+                                    <TextBlock Text="v" Style="{StaticResource VersionBadgeText}" />
+                                    <TextBlock Text="{Binding Version}" Style="{StaticResource VersionBadgeText}" />
                                 </StackPanel>
                             </Border>
 

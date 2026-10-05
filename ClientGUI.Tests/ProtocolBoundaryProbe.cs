@@ -166,14 +166,21 @@ public static class ProtocolBoundaryProbe
             True(leaked.Count == 0, "S12 视角隔离：非狼人看不到任何他人身份，狼人只能看到狼队友");
             foreach (var l in leaked) Bad("S12 泄露：" + l);
 
-            // 结构隔离：payload 字段集固定，不含「他人生份表」。
-            var expectedKeys = new[] { "Phase", "Day", "YourRole", "YourRoleDesc", "ActingRole", "Rules" };
+            // 结构隔离：payload 字段集**固定**，不含「他人生份表」。
+            // v2.1 新增的字段同样都是「本人视角或公开信息」：
+            // RoleSummary=公开的身份配置、SheriffName=公开的警长、LoverName/IsLover=自己的情侣、
+            // SheriffEnabled/YouTransferBadge=与本人相关的开关，均不泄露他人身份（上面的 Tag 检查已覆盖）。
+            var expectedKeys = new[]
+            {
+                "Phase", "Day", "YourRole", "YourRoleDesc", "ActingRole", "Rules",
+                "RoleSummary", "SheriffName", "IsLover", "LoverName", "SheriffEnabled", "YouTransferBadge"
+            };
             var keysOk = viewers.All(v =>
             {
                 var keys = (v.State.GamePayload as JsonObject)!.Select(kv => kv.Key).OrderBy(k => k).ToArray();
                 return keys.SequenceEqual(expectedKeys.OrderBy(k => k).ToArray());
             });
-            True(keysOk, "S12 payload 仅含 {Phase,Day,YourRole,YourRoleDesc,ActingRole,Rules}，无他人生份字段");
+            True(keysOk, "S12 payload 字段集固定（本人视角 + 公开信息），无他人生份字段");
 
             // -------- 14) 规则随状态下发（值来自 appsettings） --------
             var anyRules = viewers[0].Payload.Rules;

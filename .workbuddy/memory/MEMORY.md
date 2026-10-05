@@ -42,9 +42,16 @@
 - **邀请码 = 邀请令牌，不是密码**（v2.1 起）：`InvitePayload{Url,RoomId,InviteToken?,RoomName?}`；
   `GameRoom._inviteToken` 房间生命周期内稳定 → **房主改密码后旧邀请码仍有效**；只有 `RotateInviteToken()`（房主显式重置）才作废。
   `joinroom` 带 `InviteToken` 且匹配时**跳过密码校验**。客户端断线重连优先用内存里的令牌（密码可能已被房主改掉）。
-- **身份布局 `RoleLayout`（v2.1）**：`Dictionary<string,int>`（键用 `Roles.*` 中文名），
-  `Default(n)` 必须与旧内置比例**逐人一致**（零回归的保证）；`ValidateForGame(n)` 做严格校验
-  （总数 == 人数、狼≥1、狼<好人）；`Describe()` 供开局公布。**开局前必须重新读一次布局**（房主可能在建房后才设置）。
+- **身份布局 `RoleLayout`（v2.1/v2.2）**：`Dictionary<string,int>`（键用 `Roles.*` 中文名）。
+  `Default(n)` = **按人数推导的默认布局**（也是「跟随人数自动配置」的依据），v2.2 起改为**神职随人数递增**
+  （4人1神→12人6神2民，平民稳定 2-3 个）。
+  **坑**：不要把它 `Clamp(4,12)`——管理员可以把最少人数配到 3，clamp 会让 3 人局拿到 4 个身份的布局，
+  被开局的「总数必须等于人数」校验自己拦下（`--lifecycle` 小局回归时踩到过）。
+  `ValidateForGame(n)` 严格校验（总数 == 人数、狼≥1、狼<好人、警长≤1）；`Describe()` 供开局公布。
+  **开局前必须重新读一次布局**（房主可能在建房后才设置）。
+- **反作弊铁律**：一切操作以**服务端校验**为准，客户端提示不算数。已覆盖：未开局 / 不在房间 / 非房主 /
+  阶段与 op 不匹配 / 目标已出局或不存在 / **不能投票给自己** / 非法身份布局。新增校验时记得同步
+  `ClientGUI.Tests/AntiCheatTests.cs` 与 `NewRolesProbe`。
 - **op 路由**：框架只认识 `join/roomlist/gamelist/createroom/joinroom/leaveroom/roomstate/start/chat/ping`；
   其余 op（`night/vote/hunter` 等）走 `DispatchAsync` 的 **default 分支**透传给当前游戏实例，**框架不认识任何具体游戏的 op**。
 - **邀请码** = `Werewolf.Client.Share/InviteCode.cs`：`WW1:` + Base64Url(AES-GCM 信封)，
@@ -107,9 +114,19 @@
 - **设置入口**：`Views/SettingsWindow` 是唯一设置入口（**标签页**：外观 / 主界面 / 上次使用），
   可在任意界面用 **`Ctrl + ,`** 打开（`App` 用 `EventManager.RegisterClassHandler(typeof(Window), UIElement.PreviewKeyDownEvent, …)`
   统一接管；用 Preview 才不会被输入框吞掉）。快捷键判定抽成 `App.IsSettingsShortcut(key, modifiers)` 纯函数以便测试。
-- **内置控件模板都要自己主题化**：`Menu` / `MenuItem` / `Separator` / `TabControl` / `TabItem` 的 WPF 默认模板都是浅色系统外观，
-  深色主题下会刺眼（菜单项还会因 `ItemContainerStyle` 不传播而只覆盖第一层）。
+- **内置控件模板都要自己主题化**：`Menu` / `MenuItem` / `Separator` / `TabControl` / `TabItem` / `ScrollBar` / `ComboBox`
+  的 WPF 默认模板都是浅色系统外观，深色主题下会刺眼（菜单项还会因 `ItemContainerStyle` 不传播而只覆盖第一层）。
   新用到的控件记得在 `Controls.xaml` 里补模板，配色走 `DynamicResource`。
+- **ComboBox 的点击层**：模板里覆盖全区的透明 `ToggleButton` **必须给空模板**，
+  否则它的默认（系统浅色）外观会盖在内容上 → 「下拉框点击时颜色异常 / 文字被遮住」。
+- **别只依赖显示模板**：自定义类型被 WPF 直接渲染时会回退到 `ToString()`。
+  `GameInfo` 因此重写了 `ToString() => Label`，任何遗漏 ItemTemplate 的场合也不会露出类型名。
+- **XAML 里别给会立即触发事件的属性设初值**：`IsChecked="True"` 会在 `InitializeComponent` 期间触发
+  `Checked`，此时后面的控件还没创建 → NullReferenceException。改为在构造里（`_suppress` 保护下）赋值。
+- **周期刷新的界面不要"完整回填"**：`HostSettingsWindow` 每 3 秒轮询房间设置，
+  早期每轮都做完整回填 → 房主改「最大人数/密码」必须抢在刷新前点保存，否则被冲回旧值。
+  正确做法：**轮询只刷新只读展示**（`RefreshFromServerState`），可编辑控件只在
+  「首次加载」与「保存之后」回填（`ApplySettings`）。`--ui` 有对应回归断言。
 
 ## 主题系统（深/浅色 + 跟随系统）
 - 结构：`Themes/Colors.Dark.xaml` / `Colors.Light.xaml`（**颜色唯一定义处，键名必须两套一致**）、

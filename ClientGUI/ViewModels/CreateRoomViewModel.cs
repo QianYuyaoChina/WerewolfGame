@@ -13,7 +13,6 @@ public sealed class CreateRoomViewModel : ObservableObject
 
     private string _roomName = "";
     private string _password = "";
-    private bool _noPassword = true;
     private GameInfo? _selectedGame;
 
     public CreateRoomViewModel(GameClient? client = null)
@@ -49,19 +48,8 @@ public sealed class CreateRoomViewModel : ObservableObject
 
     public string RoomName { get => _roomName; set => Set(ref _roomName, value); }
 
+    /// <summary>房间密码；<b>留空即公开房间</b>（不再需要单独勾选「不设密码」）。</summary>
     public string Password { get => _password; set => Set(ref _password, value); }
-
-    /// <summary>勾选「不设密码（公开房间）」。</summary>
-    public bool NoPassword
-    {
-        get => _noPassword;
-        set
-        {
-            if (Set(ref _noPassword, value)) OnPropertyChanged(nameof(IsPasswordEnabled));
-        }
-    }
-
-    public bool IsPasswordEnabled => !NoPassword;
 
     /// <summary>
     /// 拉取服务器可用游戏填充下拉；失败/为空时保留默认狼人杀。
@@ -94,7 +82,7 @@ public sealed class CreateRoomViewModel : ObservableObject
 
     private void Create()
     {
-        // 房间名可留空（服务端回退默认名）；密码纯由「不设密码」决定；游戏取 SelectedGameId。
+        // 房间名可留空（服务端回退默认名）；密码留空即公开房间；游戏取 SelectedGameId。
         CreateSucceeded?.Invoke();
     }
 

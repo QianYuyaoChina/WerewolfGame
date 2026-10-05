@@ -9,8 +9,8 @@
     <RootNamespace>ClientGUI</RootNamespace>
     <AssemblyName>ClientGUI</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>2.1.0</Version>
-    <InformationalVersion>2.1.0</InformationalVersion>
+    <Version>2.2.1</Version>
+    <InformationalVersion>2.2.1</InformationalVersion>
     <Product>狼人杀客户端</Product>
     <NeutralLanguage>zh-CN</NeutralLanguage>
   </PropertyGroup>

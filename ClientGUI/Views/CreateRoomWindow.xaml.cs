@@ -41,8 +41,8 @@ public partial class CreateRoomWindow : Window
     /// <summary>房间名（可留空 → 服务端回退默认名）。</summary>
     public string RoomName => _vm.RoomName;
 
-    /// <summary>房间密码；勾选「不设密码」时返回 null。</summary>
-    public string? Password => _vm.NoPassword || string.IsNullOrEmpty(_vm.Password) ? null : _vm.Password;
+    /// <summary>房间密码；<b>留空即公开房间</b>（不再需要单独勾选）。</summary>
+    public string? Password => string.IsNullOrEmpty(_vm.Password) ? null : _vm.Password;
 
     /// <summary>选中的游戏机器名（默认狼人杀）。</summary>
     public string SelectedGameId => _vm.SelectedGameId;

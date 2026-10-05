@@ -58,6 +58,8 @@ public static class UiSmokeCheck
                 ExerciseMainWindow();
 
                 CheckSettingsWindow();
+                CheckHostSettingsPollKeepsEdits();
+                CheckCreateRoomGamePicker();
                 CheckTheme();
                 CheckClipboard();
 
@@ -284,6 +286,90 @@ public static class UiSmokeCheck
             "设置：Ctrl + S 不会打开设置");
 
         ThemeManager.SetTheme(AppTheme.System);
+    }
+
+    /// <summary>
+    /// 回归：房主设置窗口会周期轮询房间设置，轮询**绝不能覆盖房主正在编辑的输入框**。
+    /// 曾经的 Bug：改「房间最大人数」必须抢在轮询（3 秒）之内点保存，否则数字被冲回旧值。
+    /// </summary>
+    private static void CheckHostSettingsPollKeepsEdits()
+    {
+        var window = new HostSettingsWindow(new GameClient());
+        try
+        {
+            var maxInput = window.FindName("MaxPlayersInput") as TextBox;
+            var pwdInput = window.FindName("PasswordInput") as PasswordBox;
+            var autoBox = window.FindName("AutoLayoutBox") as CheckBox;
+
+            Check.True(maxInput != null && pwdInput != null && autoBox != null,
+                "UI：房主设置窗口含人数 / 密码 / 自动布局控件");
+            if (maxInput == null || pwdInput == null || autoBox == null) return;
+
+            // 模拟房主正在编辑（还没点保存）
+            maxInput.Text = "9";
+            pwdInput.Password = "my-new-pwd";
+            autoBox.IsChecked = false;
+
+            // 服务端此刻仍是旧值 → 轮询刷新
+            window.RefreshFromServerState(new HostSettingsDto
+            {
+                RoomId = "ABCDE",
+                RoomName = "测试房",
+                MaxPlayers = 8,
+                MinPlayers = 4,
+                MaxPlayersLimit = 12,
+                HasPassword = true,
+                InviteToken = "token-abc",
+                Running = false,
+                PlayerCount = 4,
+                CustomGameSettings = false
+            });
+
+            Check.Equal("9", maxInput.Text, "UI：轮询不覆盖正在编辑的最大人数（回归：曾自动跳回旧值）");
+            Check.Equal("my-new-pwd", pwdInput.Password, "UI：轮询不覆盖正在输入的密码");
+            Check.False(autoBox.IsChecked == true, "UI：轮询不覆盖「跟随人数自动配置」的勾选状态");
+        }
+        finally
+        {
+            try { window.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
+        }
+    }
+
+    /// <summary>
+    /// 「创建房间」窗口的游戏下拉：
+    /// ① 必须有项模板（回归：只写 DisplayMemberPath 时曾退化成显示对象的类型名）；
+    /// ② 下拉内部那个覆盖全区的 ToggleButton 必须换成空模板
+    ///    （回归：默认模板带系统浅色外观，会盖在内容上 → 「点击时颜色异常」）。
+    /// </summary>
+    private static void CheckCreateRoomGamePicker()
+    {
+        var window = new CreateRoomWindow();
+        try
+        {
+            var box = window.FindName("GameBox") as ComboBox;
+            Check.True(box != null, "UI：创建房间窗口含游戏下拉");
+            if (box == null) return;
+
+            Check.True(box.ItemTemplate != null,
+                "UI：游戏下拉设置了项模板（不会显示未本地化的类型名）");
+            // 即使模板再次遗漏，WPF 的回退是 ToString()，而 GameInfo.ToString 返回「图标 + 显示名」。
+            Check.Equal("🐺 狼人杀", new GameInfo
+            {
+                GameId = GameIds.Werewolf,
+                DisplayName = "狼人杀",
+                Emoji = "🐺"
+            }.ToString(), "UI：GameInfo.ToString 回退显示中文名（不会露出类型名）");
+
+            // 模板里那个透明 ToggleButton 必须有自己的空模板。
+            box.ApplyTemplate();
+            var toggle = box.Template?.FindName("ToggleButton", box) as System.Windows.Controls.Primitives.ToggleButton;
+            Check.True(toggle?.Template != null,
+                "UI：游戏下拉的点击层使用空模板（不会盖出系统浅色外观）");
+        }
+        finally
+        {
+            try { window.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
+        }
     }
 
     /// <summary>

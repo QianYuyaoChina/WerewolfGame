@@ -47,8 +47,8 @@
             <!-- 底部提示 -->
         </Grid.RowDefinitions>
 
-        <!-- ═══════════════ 标题 ═══════════════ -->
-        <StackPanel Grid.Row="0" Margin="0,0,0,26">
+        <!-- ═══════════════ 标题 + 右上角设置 ═══════════════ -->
+        <Grid Grid.Row="0" Margin="0,0,0,26">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                 <TextBlock Text="🐺" FontSize="26" VerticalAlignment="Center" />
                 <TextBlock Text="狼人杀" FontSize="22" FontWeight="Bold" Margin="10,0,0,0"
@@ -56,7 +56,12 @@
             </StackPanel>
             <TextBlock Text="登录后进入房间列表" FontSize="12" Margin="0,8,0,0"
                        HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
-        </StackPanel>
+
+            <!-- 设置入口统一放右上角（与主窗口、房间列表一致） -->
+            <Button Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="12,6"
+                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Click="Settings_OnClick" ToolTip="外观主题等设置（快捷键 Ctrl + ,）" />
+        </Grid>
 
         <!-- ═══════════════ 服务器地址 + 邀请码 ═══════════════ -->
         <StackPanel Grid.Row="1">
@@ -137,18 +142,9 @@
         </Border>
 
         <!-- ═══════════════ 底部：设置 + 提示 ═══════════════ -->
+        <!-- ═══════════════ 底部提示 ═══════════════ -->
         <Grid Grid.Row="6" Margin="0,16,0,0" VerticalAlignment="Bottom">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <!-- 登录界面也能进设置（主题等）；快捷键 Ctrl+, 同样可用。 -->
-            <Button Grid.Row="0" Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="12,6"
-                    HorizontalAlignment="Right" Margin="0,0,0,10" Click="Settings_OnClick"
-                    ToolTip="外观主题等设置（快捷键 Ctrl + ,）" />
-
-            <TextBlock Grid.Row="1" FontSize="11" TextWrapping="Wrap"
+            <TextBlock FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource FaintBrush}"
                        Text="首次登录的用户名会自动注册；掉线后用相同的用户名 + 密码重新登录即可恢复原房间身份。&#x0a;收到邀请码时可直接粘贴到上方，登录后自动进入对应房间（含房间密码）。&#x0a;默认地址 http://localhost:5000/gamehub（快速幂协商密钥 + 会话加密）" />
         </Grid>

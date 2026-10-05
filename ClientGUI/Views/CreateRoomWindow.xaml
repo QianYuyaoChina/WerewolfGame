@@ -4,10 +4,11 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vm="clr-namespace:ClientGUI.ViewModels"
+        xmlns:share="clr-namespace:Werewolf.Client.Share;assembly=Werewolf.Client.Share"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:CreateRoomViewModel}"
         Title="创建房间"
-        Height="430" Width="431"
+        Height="398" Width="448"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
@@ -32,8 +33,6 @@
             <!-- 房间名 -->
             <RowDefinition Height="Auto" />
             <!-- 密码 -->
-            <RowDefinition Height="Auto" />
-            <!-- 不设密码 -->
             <RowDefinition Height="*" />
             <!-- 提示 -->
             <RowDefinition Height="Auto" />
@@ -42,10 +41,27 @@
 
         <StackPanel Grid.Row="0">
             <TextBlock Text="游戏" Style="{StaticResource MutedText}" Margin="0,0,0,6" />
+            <!--
+                显式给出 ItemTemplate：只写 DisplayMemberPath 时可能退化成显示对象本身
+                （也就是用户看到的「未本地化的类型名」）。这里直接用「图标 + 名称 + 简介」。
+            -->
             <ComboBox x:Name="GameBox" Style="{StaticResource FlatComboBox}"
                       ItemsSource="{Binding Games}"
-                      SelectedItem="{Binding SelectedGame, Mode=TwoWay}"
-                      DisplayMemberPath="Label" />
+                      SelectedItem="{Binding SelectedGame, Mode=TwoWay}">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type share:GameInfo}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Emoji}" FontSize="13" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding DisplayName}" FontSize="13" Margin="6,0,0,0"
+                                       FontWeight="SemiBold" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextBrush}" />
+                            <TextBlock Text="{Binding Tagline}" FontSize="11" Margin="10,0,0,0"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       Foreground="{DynamicResource MutedBrush}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
         </StackPanel>
 
         <StackPanel Grid.Row="1" Margin="0,14,0,0">
@@ -58,20 +74,14 @@
         <StackPanel Grid.Row="2" Margin="0,14,0,0">
             <TextBlock Text="密码（可选）" Style="{StaticResource MutedText}" Margin="0,0,0,6" />
             <PasswordBox x:Name="PasswordInput" Style="{StaticResource FlatPasswordBox}"
-                         IsEnabled="{Binding IsPasswordEnabled}"
                          PasswordChanged="PasswordInput_OnPasswordChanged" />
         </StackPanel>
 
-        <CheckBox Grid.Row="3" Margin="0,14,0,0"
-                  Content="不设密码（公开房间）"
-                  Foreground="{DynamicResource TextBrush}"
-                  IsChecked="{Binding NoPassword, Mode=TwoWay}" />
+        <TextBlock Grid.Row="3" FontSize="11" TextWrapping="Wrap"
+                   Foreground="{DynamicResource FaintBrush}" VerticalAlignment="Center"
+                   Text="房间名可留空，将自动使用「你的用户名 的房间」。&#x0a;密码留空即为公开房间，任何人都可以直接加入。" />
 
-        <TextBlock Grid.Row="4" Margin="0,14,0,0" FontSize="11" TextWrapping="Wrap"
-                   Foreground="{DynamicResource FaintBrush}" VerticalAlignment="Top"
-                   Text="房间名可留空，将自动使用「你的用户名 的房间」。&#x0a;设置密码后，其他玩家需输入正确密码才能加入。" />
-
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button Content="取消" Style="{StaticResource FlatButton}" Padding="18,8" Margin="0,0,10,0"
                     Click="Cancel_OnClick" />
             <Button Content="创建" Style="{StaticResource PrimaryButton}" Padding="18,8"

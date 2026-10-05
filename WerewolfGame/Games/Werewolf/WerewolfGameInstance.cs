@@ -283,12 +283,15 @@ public sealed class WerewolfGameInstance : IGameInstance
     {
         var me = FindWpByConnection(connId);
         var targetAlive = targetId < 0 || IsAlive(targetId);
+        var myId = me == null ? -1 : IdOf(me);
 
         lock (_sync)
         {
             if (_phase != Phase.Vote) return (false, "当前不是投票阶段");
             if (me == null || !me.IsAlive) return (false, "你当前无法投票");
             if (!targetAlive) return (false, "目标已出局");
+            // 服务端硬校验：不能投自己（客户端也会拦，但客户端不可信）。
+            if (targetId >= 0 && targetId == myId) return (false, "不能投票给自己");
 
             me.VoteTarget = targetId;
             me.VoteSubmitted = true;

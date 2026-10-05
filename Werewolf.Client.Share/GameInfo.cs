@@ -29,4 +29,10 @@ public sealed class GameInfo
 
     /// <summary>列表 / 标题里的「图标 + 显示名」，映射集中在此，避免两端拼写漂移。</summary>
     public string Label => string.IsNullOrEmpty(Emoji) ? DisplayName : $"{Emoji} {DisplayName}";
+
+    /// <summary>
+    /// WPF 在控件缺少显示模板时会回退到 <c>ToString()</c>——
+    /// 这里返回「图标 + 显示名」，保证任何遗漏模板的场合也不会露出未本地化的类型名。
+    /// </summary>
+    public override string ToString() => Label;
 }

@@ -26,30 +26,63 @@ public static class NewRolesTests
     // ==================== 身份布局 ====================
 
     /// <summary>
-    /// 默认布局必须与改造前的内置比例**完全一致**（这是「不配置时零回归」的关键）。
-    /// 旧逻辑：狼人 1（≤5）/2（≤8）/3；预言家+女巫固定；猎人 ≥6；守卫 ≥9；其余平民。
+    /// 默认布局（= 按人数自动配置）的行为：神职随人数递增，平民稳定在 2-3 个，
+    /// 且**每一种人数都必须通过严格校验**。
     /// </summary>
     private static void RoleLayoutDefaults()
     {
-        var expectedWolves = new[] { 0, 0, 0, 0, 1, 1, 2, 2, 2, 3, 3, 3, 3 };
-        var expectedHunters = new[] { 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1 };
-        var expectedGuards = new[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1 };
+        // 人数 → (狼, 神职数, 民)
+        var expected = new (int n, int wolves, int specials, int villagers)[]
+        {
+            (4, 1, 1, 2), (5, 1, 2, 2), (6, 2, 2, 2), (7, 2, 3, 2), (8, 2, 3, 3),
+            (9, 3, 4, 2), (10, 3, 5, 2), (11, 3, 6, 2), (12, 4, 6, 2)
+        };
 
         var allMatch = true;
-        for (var n = 4; n <= 12; n++)
+        foreach (var (n, wolves, specials, villagers) in expected)
         {
             var layout = RoleLayout.Default(n);
-            if (layout.Get(Roles.Werewolf) != expectedWolves[n]) allMatch = false;
-            if (layout.Get(Roles.Hunter) != expectedHunters[n]) allMatch = false;
-            if (layout.Get(Roles.Guard) != expectedGuards[n]) allMatch = false;
-            if (layout.Get(Roles.Seer) != 1 || layout.Get(Roles.Witch) != 1) allMatch = false;
-            if (layout.Total != n) allMatch = false;                       // 总数必须正好等于人数
-            if (layout.Get(Roles.Cupid) != 0 || layout.Get(Roles.Sheriff) != 0) allMatch = false;  // 新身份默认不启用
-        }
-        Check.True(allMatch, "布局：默认布局与改造前的内置比例完全一致（4-12 人）");
+            var actualSpecials = layout.Get(Roles.Seer) + layout.Get(Roles.Witch)
+                                 + layout.Get(Roles.Hunter) + layout.Get(Roles.Guard)
+                                 + layout.Get(Roles.Cupid) + layout.Get(Roles.Sheriff);
 
-        Check.Equal(1, RoleLayout.Default(4).Get(Roles.Villager), "布局：4 人局 = 1 狼 2 神 1 民（平民数）");
-        Check.Equal(1, RoleLayout.Default(4).Get(Roles.Werewolf), "布局：4 人局 1 名狼人");
+            if (layout.Get(Roles.Werewolf) != wolves) allMatch = false;
+            if (actualSpecials != specials) allMatch = false;
+            if (layout.Get(Roles.Villager) != villagers) allMatch = false;
+            if (layout.Total != n) allMatch = false;
+        }
+        Check.True(allMatch, "布局：默认布局在 4-12 人下「狼/神/民」分配符合设计表");
+
+        // 每一种人数的默认布局都必须能开局（严格校验通过）。
+        var allValid = true;
+        for (var n = 4; n <= 12; n++)
+            if (!RoleLayout.Default(n).ValidateForGame(n).ok) allValid = false;
+        Check.True(allValid, "布局：4-12 人的默认布局全部通过开局的严格校验");
+
+        // 神职随人数**单调不减**（新人优先补神职而不是平民）。
+        var monotonic = true;
+        for (var n = 4; n < 12; n++)
+        {
+            var a = RoleLayout.Default(n);
+            var b = RoleLayout.Default(n + 1);
+            var specialsA = a.Get(Roles.Seer) + a.Get(Roles.Witch) + a.Get(Roles.Hunter)
+                            + a.Get(Roles.Guard) + a.Get(Roles.Cupid) + a.Get(Roles.Sheriff);
+            var specialsB = b.Get(Roles.Seer) + b.Get(Roles.Witch) + b.Get(Roles.Hunter)
+                            + b.Get(Roles.Guard) + b.Get(Roles.Cupid) + b.Get(Roles.Sheriff);
+            if (specialsB < specialsA) monotonic = false;
+        }
+        Check.True(monotonic, "布局：神职数量随人数单调不减");
+
+        // 关键阈值：丘比特 10 人起、警长 11 人起、守卫 9 人起、猎人 7 人起。
+        Check.Equal(0, RoleLayout.Default(9).Get(Roles.Cupid), "布局：9 人局还没有丘比特");
+        Check.Equal(1, RoleLayout.Default(10).Get(Roles.Cupid), "布局：10 人局加入丘比特");
+        Check.Equal(0, RoleLayout.Default(10).Get(Roles.Sheriff), "布局：10 人局还没有警长");
+        Check.Equal(1, RoleLayout.Default(11).Get(Roles.Sheriff), "布局：11 人局加入警长");
+        Check.Equal(1, RoleLayout.Default(9).Get(Roles.Guard), "布局：9 人局加入守卫");
+        Check.Equal(0, RoleLayout.Default(8).Get(Roles.Guard), "布局：8 人局还没有守卫");
+
+        // 人数越多，新人优先补神职：4→5 加的是女巫（神职）而不是平民。
+        Check.Equal(1, RoleLayout.Default(5).Get(Roles.Witch), "布局：5 人局补的第一个是女巫");
 
         // 自定义布局的展示文案（开局公布用）。
         var custom = new RoleLayout();

@@ -9,6 +9,16 @@ public sealed class RoomRow
 {
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
+
+    /// <summary>房间绑定的游戏机器名。</summary>
+    public string GameId { get; init; } = GameIds.Werewolf;
+
+    /// <summary>游戏显示名（服务器冗余下发，便于即时渲染）。</summary>
+    public string GameName { get; init; } = "";
+
+    /// <summary>游戏图标。</summary>
+    public string GameEmoji { get; init; } = "";
+
     public int PlayerCount { get; init; }
     public int MaxPlayers { get; init; }
     public string Status { get; init; } = "";
@@ -19,6 +29,15 @@ public sealed class RoomRow
     public string StatusText => RoomStatus.Name(Status);
     public string LockText => HasPassword ? "🔒" : "—";
     public string HostText => string.IsNullOrWhiteSpace(Host) ? "—" : Host;
+
+    /// <summary>「图标 + 显示名」；缺失时回退到机器名。</summary>
+    public string GameText => (GameEmoji, GameName) switch
+    {
+        ("", "") => string.IsNullOrWhiteSpace(GameId) ? "—" : GameId,
+        ("", _) => GameName,
+        (_, "") => GameEmoji,
+        _ => $"{GameEmoji} {GameName}"
+    };
 }
 
 /// <summary>
@@ -93,7 +112,7 @@ public sealed class RoomListViewModel : ObservableObject
 
     public string SelectionText => SelectedRoom == null
         ? "请选择房间后点击「加入房间」"
-        : $"已选：{SelectedRoom.Id} · {SelectedRoom.Name}";
+        : $"已选：{SelectedRoom.Id} · {SelectedRoom.GameText} · {SelectedRoom.Name}";
 
     public string Status { get => _status; private set => Set(ref _status, value); }
 
@@ -146,6 +165,9 @@ public sealed class RoomListViewModel : ObservableObject
                 {
                     Id = dto.Id,
                     Name = dto.Name,
+                    GameId = dto.GameId,
+                    GameName = dto.GameName,
+                    GameEmoji = dto.GameEmoji,
                     PlayerCount = dto.PlayerCount,
                     MaxPlayers = dto.MaxPlayers,
                     Status = dto.Status,
@@ -216,13 +238,13 @@ public sealed class RoomListViewModel : ObservableObject
         }
     }
 
-    /// <summary>创建房间并直接进入（密码为 null/空表示公开房间）。</summary>
-    public async Task CreateAndJoinAsync(string name, string? password)
+    /// <summary>创建房间并直接进入（密码为 null/空表示公开房间；gameId 缺失 → 服务端回退狼人杀）。</summary>
+    public async Task CreateAndJoinAsync(string name, string? password, string? gameId)
     {
         IsBusy = true;
         try
         {
-            var rr = await _client.CreateRoomAsync(name, password);
+            var rr = await _client.CreateRoomAsync(name, password, gameId);
             if (!rr.Ok)
             {
                 SetError(string.IsNullOrEmpty(rr.Message) ? "创建失败。" : rr.Message);

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Werewolf.Client.Share;
 
 namespace ClientGUI.Tests;
@@ -10,6 +12,12 @@ namespace ClientGUI.Tests;
 /// </summary>
 public static class LifecycleProbe
 {
+    private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>解析通用状态里的狼人杀私有负载（阶段 / 天数 / 身份等已迁入 GamePayload）。</summary>
+    private static WerewolfGameState? Wf(GameStateDto? s)
+        => s?.GamePayload?.Deserialize<WerewolfGameState>(Json);
+
     private sealed class C
     {
         private string? _actedKey;
@@ -35,23 +43,29 @@ public static class LifecycleProbe
 
         private void Drive(GameStateDto s)
         {
-            if (!s.IsAlive && s.Phase != Phases.HunterShoot) return;
+            var wf = Wf(s);
+            if (wf == null) return;
 
-            if (s.Phase == Phases.Night && !string.IsNullOrEmpty(s.ActingRole) && s.ActingRole == s.YourRole)
+            if (!s.IsAlive && wf.Phase != Phases.HunterShoot) return;
+
+            if (wf.Phase == Phases.Night && !string.IsNullOrEmpty(wf.ActingRole) && wf.ActingRole == wf.YourRole)
             {
-                var key = $"{s.Day}:Night:{s.ActingRole}";
+                var key = $"{wf.Day}:Night:{wf.ActingRole}";
                 lock (Gate) { if (_actedKey == key) return; _actedKey = key; }
                 var target = s.Players.FirstOrDefault(p => p.IsAlive && !p.IsYou)?.Id ?? -1;
                 // 女巫本局一律不救（保证狼刀生效，快速进入 GameOver）；其余角色选一个非自己目标。
-                _ = Safe(() => s.YourRole == Roles.Witch
-                    ? Client.NightActionAsync(-1, "none")
-                    : Client.NightActionAsync(target, "do"));
+                _ = Safe(() => wf.YourRole == Roles.Witch
+                    ? Client.CallGameOpAsync(WerewolfOps.Night,
+                        JsonSerializer.SerializeToNode(new NightPayload { TargetId = -1, Action = "none" }))
+                    : Client.CallGameOpAsync(WerewolfOps.Night,
+                        JsonSerializer.SerializeToNode(new NightPayload { TargetId = target, Action = "do" })));
             }
-            else if (s.Phase == Phases.Vote && s.IsAlive)
+            else if (wf.Phase == Phases.Vote && s.IsAlive)
             {
-                var key = $"{s.Day}:Vote";
+                var key = $"{wf.Day}:Vote";
                 lock (Gate) { if (_actedKey == key) return; _actedKey = key; }
-                _ = Safe(() => Client.VoteAsync(-1));   // 全员弃票
+                _ = Safe(() => Client.CallGameOpAsync(WerewolfOps.Vote,
+                    JsonSerializer.SerializeToNode(new TargetPayload { TargetId = -1 })));   // 全员弃票
             }
         }
 
@@ -118,10 +132,10 @@ public static class LifecycleProbe
             var start1 = await g1.Client.StartGameAsync();
             Eq(true, start1.ok, "D10 房主开局成功（3 人房）");
 
-            var over = await WaitUntil(() => St(g1) is { Phase: Phases.GameOver }, 40000);
+            var over = await WaitUntil(() => Wf(St(g1)) is { Phase: Phases.GameOver }, 40000);
             True(over, "D10 一局跑到 GameOver");
 
-            var dayAtOver = St(g1)?.Day ?? -1;
+            var dayAtOver = Wf(St(g1))?.Day ?? -1;
             True(dayAtOver >= 1, $"D10 首局推进到第 {dayAtOver} 天（阶段确实推进过）");
             True(g1.SawDeath || g2.SawDeath || g3.SawDeath, "D10 首局出现玩家死亡（旧局存在死亡状态）");
 
@@ -134,10 +148,10 @@ public static class LifecycleProbe
             var start2 = await g1.Client.StartGameAsync();
             Eq(true, start2.ok, "D10 结束后同一批玩家可再次 start 成功");
             var runningAgain = await WaitUntil(
-                () => St(g1) is { } s2 && s2.Day >= 1 && s2.Phase is Phases.Night or Phases.Day or Phases.Discussion or Phases.Vote, 15000);
+                () => Wf(St(g1)) is { } s2 && s2.Day >= 1 && s2.Phase is Phases.Night or Phases.Day or Phases.Discussion or Phases.Vote, 15000);
             True(runningAgain, "D10 新一局已开始推进");
             var newState = St(g1);
-            Eq(1, newState?.Day ?? -1, "D10 新一局 Day 从初始值 1 重新开始");
+            Eq(1, Wf(newState)?.Day ?? -1, "D10 新一局 Day 从初始值 1 重新开始");
             True(newState != null && newState.Players.All(p => p.IsAlive), "D10 新一局所有玩家恢复存活（旧局死亡状态已清空）");
 
             // ============ D11：空房宽限期回收 ============

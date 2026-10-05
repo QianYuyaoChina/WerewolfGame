@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.SignalR;
 using Werewolf.Client.Share;
 using Werewolf.Client.Share.Crypto;
+using Werewolf.Server.Games;
 
 namespace Werewolf.Server;
 
@@ -23,14 +24,16 @@ public class GameHub : Hub
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
     private readonly RoomManager _rooms;
+    private readonly IGameCatalog _catalog;
     private readonly AccountStore _accounts;
     private readonly CryptoSessionStore _sessions;
     private readonly EncryptedChannel _channel;
 
-    public GameHub(RoomManager rooms, AccountStore accounts,
+    public GameHub(RoomManager rooms, IGameCatalog catalog, AccountStore accounts,
                    CryptoSessionStore sessions, EncryptedChannel channel)
     {
         _rooms = rooms;
+        _catalog = catalog;
         _accounts = accounts;
         _sessions = sessions;
         _channel = channel;
@@ -128,19 +131,21 @@ public class GameHub : Hub
         {
             return request.Op switch
             {
+                // ---- 通用 op（框架理解）----
                 Ops.Join => HandleJoin(request.Payload),
                 Ops.RoomList => HandleRoomList(),
+                Ops.GameList => HandleGameList(),
                 Ops.CreateRoom => await HandleCreateRoomAsync(request.Payload),
                 Ops.JoinRoom => await HandleJoinRoomAsync(request.Payload),
                 Ops.LeaveRoom => await HandleLeaveRoomAsync(request.Payload),
                 Ops.State => HandleState(),
                 Ops.Start => await HandleStartAsync(),
-                Ops.Night => HandleNight(request.Payload),
-                Ops.Vote => HandleVote(request.Payload),
-                Ops.Hunter => HandleHunter(request.Payload),
                 Ops.Chat => await HandleChatAsync(request.Payload),
                 Ops.Ping => RpcReply.Success(),
-                _ => RpcReply.Error("未知操作：" + request.Op)
+
+                // ---- 默认分支：未知 op 一律视为「本房间当前游戏的操作」，透传给游戏实例 ----
+                // 框架不认识 night / vote / hunter 等具体游戏 op，只按「当前房间的游戏」路由。
+                _ => HandleGameAction(request.Op, request.Payload)
             };
         }
         catch (Exception ex)
@@ -189,13 +194,38 @@ public class GameHub : Hub
         };
     }
 
+    /// <summary>服务器当前可用游戏（gamelist）：供客户端填充「创建房间」下拉。</summary>
+    private RpcReply HandleGameList()
+    {
+        var result = new GameListResult { Ok = true, Msg = "", Games = _catalog.Available.ToList() };
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(result, Json)
+        };
+    }
+
+    /// <summary>
+    /// 把未知 op 透传给「当前连接所在房间的游戏实例」（框架只做透传，不理解 op 语义）。
+    /// 未进房 → <see cref="ServerMessages.NotInRoom"/>。
+    /// </summary>
+    private RpcReply HandleGameAction(string op, JsonNode? payload)
+    {
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
+        var (ok, msg) = room.HandleGameAction(op, payload as JsonObject, Context.ConnectionId);
+        return ok ? RpcReply.Success() : RpcReply.Error(msg);
+    }
+
     private async Task<RpcReply> HandleCreateRoomAsync(JsonNode? payload)
     {
         if (string.IsNullOrEmpty(_rooms.GetUsername(Context.ConnectionId)))
             return RpcReply.Error(ServerMessages.NotLoggedIn);
 
         var req = payload?.Deserialize<CreateRoomPayload>(Json) ?? new CreateRoomPayload();
-        var (ok, msg, roomId, _) = _rooms.CreateRoom(Context.ConnectionId, req.Name ?? "", req.Password);
+        var (ok, msg, roomId, _) = _rooms.CreateRoom(Context.ConnectionId, req.Name ?? "", req.Password, req.GameId);
         if (!ok) return RpcReply.Error(msg);
 
         var room = _rooms.Find(roomId);
@@ -238,12 +268,8 @@ public class GameHub : Hub
             var username = _rooms.GetUsername(Context.ConnectionId);
             if (reconnected)
             {
+                // 局中重连的身份补发由游戏实例在 OnPlayerReconnected 中经 ctx.PrivateAsync 完成，框架无感。
                 await room.BroadcastAsync($"🔄 {username} 重新连接。");
-                if (room.IsRunning)
-                {
-                    var player = room.GetPlayer(Context.ConnectionId);
-                    if (player != null) await room.ResendRoleAsync(player);   // 补发身份私聊
-                }
             }
             else
             {
@@ -322,36 +348,6 @@ public class GameHub : Hub
         var (ok, msg) = room.StartGame(Context.ConnectionId);
         if (!ok) await _channel.SendMessageAsync(Context.ConnectionId, "⚠️ " + msg);
         return ok ? RpcReply.Success() : RpcReply.Error(msg);
-    }
-
-    private RpcReply HandleNight(JsonNode? payload)
-    {
-        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
-        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
-
-        var act = payload?.Deserialize<NightPayload>(Json) ?? new NightPayload();
-        room.SubmitNightAction(Context.ConnectionId, act.TargetId, act.Action ?? "do");
-        return RpcReply.Success();
-    }
-
-    private RpcReply HandleVote(JsonNode? payload)
-    {
-        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
-        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
-
-        var act = payload?.Deserialize<TargetPayload>(Json) ?? new TargetPayload();
-        room.SubmitVote(Context.ConnectionId, act.TargetId);
-        return RpcReply.Success();
-    }
-
-    private RpcReply HandleHunter(JsonNode? payload)
-    {
-        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
-        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
-
-        var act = payload?.Deserialize<TargetPayload>(Json) ?? new TargetPayload();
-        room.SubmitHunterShot(Context.ConnectionId, act.TargetId);
-        return RpcReply.Success();
     }
 
     private async Task<RpcReply> HandleChatAsync(JsonNode? payload)

@@ -15,46 +15,28 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <!-- 左栏：我的身份 + 玩家列表 + 房主开始按钮 -->
+    <!--
+        左栏（宿主）：玩家列表 + 房主开始按钮。
+        「我的身份」等玩法展示由插槽面板（如 WerewolfPanel）负责，宿主保持游戏无关。
+    -->
     <Border Background="{DynamicResource PanelBrush}" CornerRadius="10"
             BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Padding="14">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- 我的身份 -->
-            <Border Grid.Row="0" Background="{DynamicResource CardBrush}" CornerRadius="8" Padding="12,10">
-                <StackPanel>
-                    <TextBlock Text="我的身份" Style="{StaticResource MutedText}" />
-                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                        <TextBlock Text="{Binding YourRoleDisplay}" FontSize="19" FontWeight="Bold"
-                                   Foreground="{DynamicResource TextBrush}" />
-                        <Border Background="{DynamicResource ChipBrush}" CornerRadius="4" Padding="7,2" Margin="10,3,0,0"
-                                VerticalAlignment="Top">
-                            <TextBlock Text="{Binding AliveText}" FontSize="11"
-                                       Foreground="{Binding AliveBrush}" />
-                        </Border>
-                    </StackPanel>
-                    <TextBlock Text="{Binding YourRoleDesc}" FontSize="11" Margin="0,7,0,0"
-                               TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
-                    <TextBlock Text="{Binding MeText}" FontSize="10.5" Margin="0,6,0,0"
-                               Foreground="{DynamicResource FaintBrush}" />
-                </StackPanel>
-            </Border>
-
             <!-- 玩家列表标题 -->
-            <Grid Grid.Row="1" Margin="0,16,0,8">
+            <Grid Grid.Row="0" Margin="0,0,0,8">
                 <TextBlock Text="玩家列表" Style="{StaticResource SectionTitle}" Margin="0" />
                 <TextBlock Text="点击玩家可选择目标" FontSize="10.5" HorizontalAlignment="Right"
                            VerticalAlignment="Center" Foreground="{DynamicResource FaintBrush}" />
             </Grid>
 
             <!-- 玩家列表 -->
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
                 <ListBox x:Name="PlayerList"
                          ItemsSource="{Binding Players}"
@@ -64,7 +46,7 @@
             </ScrollViewer>
 
             <!-- 开始按钮 / 提示 -->
-            <StackPanel Grid.Row="3" Margin="0,12,0,0">
+            <StackPanel Grid.Row="2" Margin="0,12,0,0">
                 <Button Content="🎬 开始游戏" Style="{StaticResource PrimaryButton}"
                         Command="{Binding StartGameCommand}"
                         IsEnabled="{Binding CanStartGame}"

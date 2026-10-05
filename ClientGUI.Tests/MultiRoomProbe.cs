@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Werewolf.Client.Share;
 using Werewolf.Server;
+using Werewolf.Server.Games.Werewolf;
 
 namespace ClientGUI.Tests;
 
@@ -208,7 +209,7 @@ public static class MultiRoomProbe
             // A 房开局后：B 房仍应保持等待（独立性）
             await Task.Delay(1200);
             var bStateEarly = StateOf(Get("eve"));
-            True(bStateEarly != null && bStateEarly.Phase == Phases.Waiting, "B4 A 房开局后 B 房保持 Waiting（互不影响）");
+            True(Wf(bStateEarly)?.Phase == Phases.Waiting, "B4 A 房开局后 B 房保持 Waiting（互不影响）");
             True(!MsgsOf(Get("eve")).Any(m => m.Contains("你的身份是")), "B4 B 房玩家未收到 A 房身份私聊");
 
             var startB = await Get("eve").Client.StartGameAsync();
@@ -224,8 +225,8 @@ public static class MultiRoomProbe
             // 两房状态各自推进（Running）
             var aSt = StateOf(Get("alice"));
             var bSt = StateOf(Get("eve"));
-            True(aSt != null && aSt.Phase != Phases.Waiting && aSt.RoomId == aid, "B4 房间A 独立推进（非 Waiting，房间号正确）");
-            True(bSt != null && bSt.Phase != Phases.Waiting && bSt.RoomId == bid, "B4 房间B 独立推进（非 Waiting，房间号正确）");
+            True(Wf(aSt)?.Phase != Phases.Waiting && aSt != null && aSt.RoomId == aid, "B4 房间A 独立推进（非 Waiting，房间号正确）");
+            True(Wf(bSt)?.Phase != Phases.Waiting && bSt != null && bSt.RoomId == bid, "B4 房间B 独立推进（非 Waiting，房间号正确）");
 
             var list2 = await Get("alice").Client.ListRoomsAsync();
             var ra2 = list2.Rooms.FirstOrDefault(r => r.Id == aid);
@@ -303,6 +304,10 @@ public static class MultiRoomProbe
 
     // ==================== 纯逻辑（无需服务器） ====================
 
+    /// <summary>从通用状态里解析狼人杀私有负载（阶段字段已迁入 GamePayload）。</summary>
+    private static WerewolfGameState? Wf(GameStateDto? s)
+        => s?.GamePayload?.Deserialize<WerewolfGameState>(Json);
+
     private static void HeadlessChecks()
     {
         // C9：带房间号盐的单向哈希 —— 同密码不同房间号存储值不同
@@ -314,30 +319,58 @@ public static class MultiRoomProbe
 
         // MaxRooms（纯逻辑，独立于服务器配置）
         var channel = new EncryptedChannel(null!, new CryptoSessionStore());
-        var rules = new GameRules { MinPlayers = 4, MaxPlayers = 12, NightActionSeconds = 1, DiscussionSeconds = 1, VoteSeconds = 1, HunterShotSeconds = 1 };
-        var mgr = new RoomManager(channel, rules, new RoomOptions { MaxRooms = 2, EmptyGraceSeconds = 60, RecycleScanSeconds = 1 });
+        var (catalog, _) = TestGames.WerewolfOnly(minPlayers: 4, maxPlayers: 12);
+        var mgr = new RoomManager(channel, catalog, new RoomOptions { MaxRooms = 2, EmptyGraceSeconds = 60, RecycleScanSeconds = 1 });
         mgr.BindIdentity("c1", "u1"); mgr.BindIdentity("c2", "u2"); mgr.BindIdentity("c3", "u3");
-        var r1 = mgr.CreateRoom("c1", "r1", null);
-        var r2 = mgr.CreateRoom("c2", "r2", null);
-        var r3 = mgr.CreateRoom("c3", "r3", null);
+        var r1 = mgr.CreateRoom("c1", "r1", null, GameIds.Werewolf);
+        var r2 = mgr.CreateRoom("c2", "r2", null, GameIds.Werewolf);
+        var r3 = mgr.CreateRoom("c3", "r3", null, GameIds.Werewolf);
         Eq(true, r1.ok && r2.ok, "E19 上限=2 时前 2 个房间可创建");
         Eq(false, r3.ok, "E19 上限=2 时第 3 个房间被拒");
         Eq(ServerMessages.TooManyRooms, r3.msg, "E19 超上限返回「房间数已达上限，请稍后再试」");
 
-        // D10：开局会重置死亡 / 药水状态（headless 直接驱动 GameRoom）
+        // D10：开局会重置死亡 / 药水状态（headless 经狼人杀实例断言）
         var chan2 = new EncryptedChannel(null!, new CryptoSessionStore());
-        var rules2 = new GameRules { MinPlayers = 3, MaxPlayers = 3, NightActionSeconds = 1, DiscussionSeconds = 1, VoteSeconds = 1, HunterShotSeconds = 1 };
-        var room = new GameRoom("HD001", "headless", null, chan2, rules2);
+        var (_, wfModule) = TestGames.WerewolfOnly(minPlayers: 3, maxPlayers: 3);
+        // 给房间注入「3 人小局」规则（人数上下限由本游戏规则决定，与生产 appsettings 同路径）。
+        var smallRules = new GameRules
+        {
+            MinPlayers = 3,
+            MaxPlayers = 3,
+            NightActionSeconds = 1,
+            DiscussionSeconds = 1,
+            VoteSeconds = 1,
+            HunterShotSeconds = 1
+        };
+        var room = new GameRoom("HD001", "headless", null, chan2, GameIds.Werewolf,
+            wfModule.CreateInstance, new TestGameConfig(smallRules));
         room.AddOrReconnect("h", "hc");
         room.AddOrReconnect("a", "ac");
         room.AddOrReconnect("b", "bc");
-        var victim = room.GetPlayer("ac")!;
+
+        var victim = room.GetPlayer("ac")!;   // 连接号 → 玩家（用户名 "a"）
         victim.IsAlive = false;
-        victim.HasAntidote = false;
-        victim.HasPoison = false;
-        room.StartGame("hc");
+
+        // 预热：触发 SnapshotPlayers 建立狼人私有点位，再把药水标记为“已用”，模拟上一局的残留。
+        var instance = wfModule.LastInstance!;
+        instance.DecoratePlayers(new List<PlayerDto>(), "h");
+        var victimWp = GetWerewolfPlayer(instance, victim.Username)!;
+        victimWp.HasAntidote = false;
+        victimWp.HasPoison = false;
+
+        var start = room.StartGame("hc");
+        True(start.ok, "D10 房主开局成功");
         True(victim.IsAlive, "D10 开局重置：死亡状态被清空");
-        True(victim.HasAntidote, "D10 开局重置：解药状态被清空");
-        True(victim.HasPoison, "D10 开局重置：毒药状态被清空");
+        True(victimWp.HasAntidote, "D10 开局重置：解药状态被清空");
+        True(victimWp.HasPoison, "D10 开局重置：毒药状态被清空");
+    }
+
+    /// <summary>反射读取狼人杀实例的私有玩家状态（username → <see cref="WerewolfPlayer"/>）。</summary>
+    private static WerewolfPlayer? GetWerewolfPlayer(WerewolfGameInstance instance, string username)
+    {
+        var field = typeof(WerewolfGameInstance).GetField("_wp",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        if (field?.GetValue(instance) is not Dictionary<string, WerewolfPlayer> wp) return null;
+        return wp.TryGetValue(username, out var p) ? p : null;
     }
 }

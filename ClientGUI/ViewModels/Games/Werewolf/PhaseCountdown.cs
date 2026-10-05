@@ -1,10 +1,10 @@
 using System.Windows.Threading;
 using Werewolf.Client.Share;
 
-namespace ClientGUI.ViewModels;
+namespace ClientGUI.ViewModels.Games.Werewolf;
 
 /// <summary>
-/// 阶段倒计时：只做“阶段 → 剩余秒数 → 文案”的本地提示，服务器才是真正的裁决者。
+/// 阶段倒计时（狼人杀私有）：只做“阶段 → 剩余秒数 → 文案”的本地提示，服务器才是真正的裁决者。
 /// </summary>
 public sealed class PhaseCountdown
 {

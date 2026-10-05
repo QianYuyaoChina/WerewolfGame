@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using Werewolf.Client.Share;
+using Werewolf.Server.Games;
 
 namespace Werewolf.Server;
 
 /// <summary>
 /// 房间注册表：以房间号为键管理多个 <see cref="GameRoom"/>，并维护「连接 → 房间 / 账号」映射。
 /// 设计为**纯注册表、无后台线程**，便于测试直接 new；周期回收由 <see cref="RoomRecycleService"/> 负责。
+/// 依赖 <see cref="IGameCatalog"/> 取「可用游戏 / 实例工厂」，本类不感知任何具体游戏。
 /// 所有字典均为 <see cref="ConcurrentDictionary{TKey,TValue}"/>，跨房间只读房间的只读快照属性，
 /// 绝不在持有注册表操作时去遍历某个房间的玩家集合。
 /// </summary>
@@ -16,14 +18,16 @@ public sealed class RoomManager
     private readonly ConcurrentDictionary<string, string> _connUser = new();
 
     private readonly EncryptedChannel _channel;
-    private readonly GameRules _rules;
+    private readonly IGameCatalog _catalog;
     private readonly RoomOptions _options;
+    private readonly IGameConfig? _config;
 
-    public RoomManager(EncryptedChannel channel, GameRules rules, RoomOptions options)
+    public RoomManager(EncryptedChannel channel, IGameCatalog catalog, RoomOptions options, IGameConfig? config = null)
     {
         _channel = channel;
-        _rules = rules;
+        _catalog = catalog;
         _options = options;
+        _config = config;
     }
 
     /// <summary>当前存活房间数。</summary>
@@ -59,14 +63,27 @@ public sealed class RoomManager
     }
 
     /// <summary>
-    /// 创建房间并让发起连接成为房主。
+    /// 创建房间并让发起连接成为房主。房间绑定到指定游戏：
+    /// <paramref name="gameId"/> 缺失 / 空白 → 回退 <see cref="GameIds.Default"/>（狼人杀）；
+    /// 非空但服务器不支持 → 返回 <see cref="ServerMessages.GameUnavailable"/>。
     /// 返回 (成功, 提示, 房间号, 是否重连)。
     /// </summary>
     public (bool ok, string msg, string roomId, bool reconnected)
-        CreateRoom(string connId, string name, string? password)
+        CreateRoom(string connId, string name, string? password, string? gameId)
     {
         var username = GetUsername(connId);
         if (string.IsNullOrEmpty(username)) return (false, ServerMessages.NotLoggedIn, "", false);
+
+        // ---- 解析游戏：缺失回退 werewolf；未知拒绝 ----
+        var requested = (gameId ?? "").Trim();
+        string resolved;
+        if (requested.Length == 0) resolved = GameIds.Default;
+        else if (_catalog.Contains(requested)) resolved = requested;
+        else return (false, ServerMessages.GameUnavailable, "", false);
+
+        if (!_catalog.TryGetFactory(resolved, out var factory))
+            return (false, ServerMessages.GameUnavailable, "", false);
+
         if (_rooms.Count >= Math.Max(1, _options.MaxRooms))
             return (false, ServerMessages.TooManyRooms, "", false);
 
@@ -84,7 +101,7 @@ public sealed class RoomManager
             return (false, ex.Message, "", false);
         }
 
-        var room = new GameRoom(roomId, roomName, password, _channel, _rules);
+        var room = new GameRoom(roomId, roomName, password, _channel, resolved, factory, _config);
         if (!_rooms.TryAdd(roomId, room))
             return (false, ServerMessages.TooManyRooms, "", false);
 
@@ -139,7 +156,7 @@ public sealed class RoomManager
     /// 房间内还有其他成员时，房主会转让给下一位，房间始终保留。
     /// </summary>
     /// <returns>(房间, 玩家, 新房主用户名, 房间是否已被关闭) 供上层广播。</returns>
-    public (GameRoom? room, Player? player, string newHost, bool roomClosed)
+    public (GameRoom? room, RoomPlayer? player, string newHost, bool roomClosed)
         LeaveRoom(string connId, bool keepRoom = false)
     {
         var room = GetRoomByConnection(connId);
@@ -181,7 +198,7 @@ public sealed class RoomManager
     }
 
     /// <summary>连接断开：脱离房间并清掉「连接 → 账号」映射。返回 (房间, 玩家, 新房主) 供上层广播。</summary>
-    public (GameRoom? room, Player? player, string newHost) LeaveByConnection(string connId)
+    public (GameRoom? room, RoomPlayer? player, string newHost) LeaveByConnection(string connId)
     {
         var result = Detach(connId);
         _connUser.TryRemove(connId, out _);
@@ -225,7 +242,7 @@ public sealed class RoomManager
     /// 把连接从当前房间摘除（房间内标记断线 / 未开局则移出名单），并清理映射。
     /// 返回 (房间, 玩家, 新房主用户名)。
     /// </summary>
-    private (GameRoom? room, Player? player, string newHost) Detach(string connId)
+    private (GameRoom? room, RoomPlayer? player, string newHost) Detach(string connId)
     {
         if (string.IsNullOrEmpty(connId) || !_connRoom.TryRemove(connId, out var roomId))
             return (null, null, "");

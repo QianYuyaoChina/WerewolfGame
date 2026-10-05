@@ -8,11 +8,14 @@ namespace Werewolf.Client.Share;
 /// </summary>
 public static class Ops
 {
+    /// <summary>账号校验（首次即注册）。</summary>
     public const string Join = "join";
+
+    /// <summary>
+    /// 通用游戏生命周期：房主开局（对所有游戏通用）。框架理解它，但不理解任何具体游戏的玩法。
+    /// </summary>
     public const string Start = "start";
-    public const string Night = "night";
-    public const string Vote = "vote";
-    public const string Hunter = "hunter";
+
     public const string Chat = "chat";
 
     /// <summary>心跳：用于测量往返时延并探测“半开连接”。</summary>
@@ -38,6 +41,12 @@ public static class Ops
     /// 那次广播没人接收，新界面就会一直显示为空——用这个操作补一次初始状态。
     /// </summary>
     public const string State = "roomstate";
+
+    /// <summary>查询「服务器当前可用游戏」（只读）。</summary>
+    public const string GameList = "gamelist";
+
+    // ⚠️ 注意：night / vote / hunter 不再是框架 op；它们由狼人杀模块自己的
+    //    WerewolfOps 声明，走 GameHub 的「默认分支」路由到当前房间的游戏实例。
 }
 
 /// <summary>服务器推送类型（服务器 → 客户端）。</summary>
@@ -59,6 +68,12 @@ public static class ServerMessages
     public const string OnlyHostCanStart = "只有房主可以开始游戏";
     public const string TooManyRooms = "房间数已达上限，请稍后再试";
     public const string AlreadyInRoom = "该账号已在房间中";
+
+    /// <summary>createroom 的 GameId 服务器不支持。</summary>
+    public const string GameUnavailable = "该游戏不可用";
+
+    /// <summary>gamelist 不可用（理论不出现，兜底）。</summary>
+    public const string GameListFailed = "无法获取游戏列表";
 
     public static string RoomFull(int max) => $"房间已满（最多 {max} 人）";
 }
@@ -162,6 +177,9 @@ public sealed class CreateRoomPayload
 {
     public string Name { get; set; } = "";
     public string? Password { get; set; }
+
+    /// <summary>房间绑定的游戏机器名；null/空白 → 服务端回退 <see cref="GameIds.Werewolf"/>。</summary>
+    public string? GameId { get; set; }
 }
 
 /// <summary>加入房间。RoomId 必填；Password 仅对加密房间有效。</summary>
@@ -192,10 +210,19 @@ public sealed class RoomInfoDto
     /// <summary>房间名（可重名）。</summary>
     public string Name { get; set; } = "";
 
+    /// <summary>房间绑定的游戏机器名（<see cref="GameIds"/>）。</summary>
+    public string GameId { get; set; } = GameIds.Werewolf;
+
+    /// <summary>游戏显示名（冗余，便于列表即时渲染，无需再查游戏目录）。</summary>
+    public string GameName { get; set; } = "";
+
+    /// <summary>游戏图标 emoji（冗余）。</summary>
+    public string GameEmoji { get; set; } = "";
+
     /// <summary>名单人数。</summary>
     public int PlayerCount { get; set; }
 
-    /// <summary>上限（来自 GameRules.MaxPlayers）。</summary>
+    /// <summary>上限（来自该游戏的 <see cref="GameInfo.MaxPlayers"/>）。</summary>
     public int MaxPlayers { get; set; }
 
     /// <summary>"Waiting" | "Running" | "GameOver"（用 <see cref="RoomStatus"/>）。</summary>

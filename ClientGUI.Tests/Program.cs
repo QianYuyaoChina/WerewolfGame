@@ -47,6 +47,15 @@ if (Array.IndexOf(args, "--ui") >= 0)
     return Check.FailureList.Count == 0 ? 0 : 1;
 }
 
+// 协议 / 边界探针（QA 独立编写）：--protocol <url>
+var protocolIndex = Array.IndexOf(args, "--protocol");
+if (protocolIndex >= 0 && protocolIndex + 1 < args.Length)
+{
+    var url = args[protocolIndex + 1];
+    Console.WriteLine($"════════ 协议 / 边界探针（{url}） ════════");
+    return await ProtocolBoundaryProbe.RunAsync(url);
+}
+
 // 多房间端到端探针：--rooms <url>
 var roomsIndex = Array.IndexOf(args, "--rooms");
 if (roomsIndex >= 0 && roomsIndex + 1 < args.Length)
@@ -118,6 +127,12 @@ GameRulesTests.RunAll();
 
 Console.WriteLine("════════ 多房间纯逻辑校验 ════════");
 RoomTests.RunAll();
+
+Console.WriteLine("════════ 扩展性验证（假游戏） ════════");
+FakeGameProbe.RunAll();
+
+Console.WriteLine("════════ 扩展性验证（QA 独立第三游戏） ════════");
+IndependentGameProbe.RunAll();
 
 Console.WriteLine();
 if (Check.FailureList.Count == 0)

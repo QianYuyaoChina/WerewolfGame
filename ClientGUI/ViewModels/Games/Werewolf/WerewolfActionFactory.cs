@@ -1,6 +1,6 @@
 using Werewolf.Client.Share;
 
-namespace ClientGUI.ViewModels;
+namespace ClientGUI.ViewModels.Games.Werewolf;
 
 /// <summary>
 /// 组装操作面板所需的全部“事实”。由视图模型整理后传入，
@@ -57,11 +57,11 @@ public sealed class ActionPlan
 /// “阶段 + 身份 + 本回合进度” → 右侧操作面板的按钮与提示。
 /// 规则集中在这里，界面与视图模型都不再散落 switch。
 /// </summary>
-public sealed class GameActionFactory
+public sealed class WerewolfActionFactory
 {
-    private readonly GameCommands _commands;
+    private readonly WerewolfCommands _commands;
 
-    public GameActionFactory(GameCommands commands) => _commands = commands;
+    public WerewolfActionFactory(WerewolfCommands commands) => _commands = commands;
 
     public ActionPlan Build(ActionContext c) => c.Phase switch
     {

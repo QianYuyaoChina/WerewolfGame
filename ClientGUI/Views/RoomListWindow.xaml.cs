@@ -13,11 +13,13 @@ namespace ClientGUI.Views;
 public partial class RoomListWindow : Window
 {
     private readonly RoomListViewModel _vm;
+    private readonly GameClient _session;
 
     public RoomListWindow(GameClient session)
     {
         InitializeComponent();
 
+        _session = session;
         _vm = new RoomListViewModel(session);
         DataContext = _vm;
 
@@ -61,9 +63,9 @@ public partial class RoomListWindow : Window
 
     private void CreateRoom_OnClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new CreateRoomWindow { Owner = this };
+        var dialog = new CreateRoomWindow(_session) { Owner = this };
         if (dialog.ShowDialog() == true)
-            _ = _vm.CreateAndJoinAsync(dialog.RoomName, dialog.Password);
+            _ = _vm.CreateAndJoinAsync(dialog.RoomName, dialog.Password, dialog.SelectedGameId);
     }
 
     /// <summary>房间列表界面也能打开设置（外观主题等）。</summary>

@@ -16,5 +16,7 @@
     <local:BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
     <local:EnabledToOpacityConverter x:Key="EnabledToOpacity" />
+    <local:HexToBrushConverter x:Key="HexToBrush" />
+    <local:NonEmptyToVisibilityConverter x:Key="NonEmptyToVisibility" />
 
 </ResourceDictionary>

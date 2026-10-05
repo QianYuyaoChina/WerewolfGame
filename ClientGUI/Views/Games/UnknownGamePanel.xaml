@@ -1,0 +1,28 @@
+<UserControl x:Class="ClientGUI.Views.Games.UnknownGamePanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vmu="clr-namespace:ClientGUI.ViewModels.Games"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vmu:UnknownGameViewModel}">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- 兜底面板：服务器上线了本客户端不认识的游戏 -->
+    <Border Background="{DynamicResource CardBrush}" CornerRadius="8" Padding="14"
+            BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
+        <StackPanel VerticalAlignment="Top">
+            <TextBlock Text="🧩 未知游戏" FontSize="15" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="{Binding Hint}" FontSize="12" Margin="0,8,0,0"
+                       TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
+        </StackPanel>
+    </Border>
+</UserControl>

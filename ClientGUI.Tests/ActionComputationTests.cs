@@ -1,12 +1,18 @@
+using System.Collections.ObjectModel;
 using System.Reflection;
+using System.Text.Json;
 using ClientGUI.ViewModels;
+using ClientGUI.ViewModels.Games.Werewolf;
 using Werewolf.Client.Share;
 
 namespace ClientGUI.Tests;
 
 /// <summary>
 /// 校验“服务器状态 → 操作按钮”的翻译逻辑。
-/// 直接驱动 <see cref="GameViewModel"/>，不依赖真实服务器。
+/// 多游戏改造后：<see cref="GameViewModel"/> 只做宿主（玩家列表 / 房主 / 保留询问），
+/// 玩法（阶段 / 身份 / 操作按钮）改由插槽面板 <see cref="WerewolfViewModel"/> 承载；
+/// 因此本用例改为构造「宿主 + 狼人杀面板」的测试宿主 <see cref="Harness"/> 并驱动它。
+/// 断言语义与改造前保持一致。
 /// </summary>
 public static class ActionComputationTests
 {
@@ -14,13 +20,53 @@ public static class ActionComputationTests
         typeof(GameViewModel).GetMethod("OnStateReceived", BindingFlags.Instance | BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("找不到 OnStateReceived");
 
-    /// <summary>模拟收到一次服务器 State 推送。</summary>
-    private static GameViewModel Apply(GameStateDto state)
+    /// <summary>
+    /// 测试宿主：把「宿主视图模型」与「狼人杀面板视图模型」拼在一起，
+    /// 让断言仍能像改造前那样同时读到两边的属性（宿主侧：玩家 / 房主；面板侧：阶段 / 操作）。
+    /// </summary>
+    private sealed class Harness
     {
-        var vm = new GameViewModel();
-        ApplyStateMethod.Invoke(vm, new object[] { state });
-        return vm;
+        public Harness(GameStateDto state)
+        {
+            Host = new GameViewModel();
+            ApplyStateMethod.Invoke(Host, new object[] { state });
+            Game = (WerewolfViewModel)Host.Game!;
+        }
+
+        public GameViewModel Host { get; }
+        public WerewolfViewModel Game { get; }
+
+        public void Reapply(GameStateDto state) => ApplyStateMethod.Invoke(Host, new object[] { state });
+
+        // ---- 宿主侧 ----
+        public ObservableCollection<PlayerRow> Players => Host.Players;
+        public bool IsHost => Host.IsHost;
+        public bool IsJoined => Host.IsJoined;
+        public bool CanChat => Host.CanChat;
+        public int YourId => Host.YourId;
+        public bool IsAlive => Host.IsAlive;
+        public bool NeedsKeepRoomDecision => Host.NeedsKeepRoomDecision;
+        public Func<bool>? ConfirmKeepRoom { get => Host.ConfirmKeepRoom; set => Host.ConfirmKeepRoom = value; }
+        public bool ResolveKeepRoom() => Host.ResolveKeepRoom();
+        public void SelectPlayer(PlayerRow row) => Host.SelectPlayer(row);
+
+        // ---- 游戏面板侧 ----
+        public ObservableCollection<GameAction> Actions => Game.Actions;
+        public string ActionHint => Game.ActionHint;
+        public bool HasActionHint => Game.HasActionHint;
+        public bool CanStartGame => Game.CanStartGame;
+        public string StartHint => Game.StartHint;
+        public bool ShowStartHint => Game.ShowStartHint;
+        public string CountdownText => Game.CountdownText;
+        public bool HasCountdown => Game.HasCountdown;
+        public int Day => Game.Day;
+        public string DayText => Game.DayText;
+        public string PhaseDisplay => Game.PhaseDisplay;
+        public string YourRoleDisplay => Game.YourRoleDisplay;
     }
+
+    /// <summary>模拟收到一次服务器 State 推送（构造「宿主 + 狼人杀面板」）。</summary>
+    private static Harness Apply(GameStateDto state) => new(state);
 
     private static GameStateDto State(
         string phase,
@@ -31,7 +77,8 @@ public static class ActionComputationTests
         int playerCount = 4,
         int[]? dead = null,
         string? actingRole = null,
-        string roomId = "")
+        string roomId = "",
+        GameRules? rules = null)
     {
         var players = new List<PlayerDto>();
         for (var i = 0; i < playerCount; i++)
@@ -44,21 +91,31 @@ public static class ActionComputationTests
                 IsHost = i == 0,
                 IsYou = i == yourId,
                 IsConnected = true,
-                Role = i == yourId ? yourRole : null
+                Tag = i == yourId ? yourRole : null
             });
         }
 
-        return new GameStateDto
+        // 狼人杀私有负载：阶段 / 天数 / 身份 / 轮到谁 / 规则。
+        var payload = new WerewolfGameState
         {
             Phase = phase,
             Day = day,
-            YourId = yourId,
             YourRole = yourRole,
             YourRoleDesc = "desc",
-            IsAlive = isAlive,
             ActingRole = actingRole ?? "",
+            Rules = rules
+        };
+
+        return new GameStateDto
+        {
+            GameId = GameIds.Werewolf,
             RoomId = roomId,
-            Players = players
+            Running = phase != Phases.Waiting,
+            Status = phase == Phases.Waiting ? RoomStatus.Waiting : RoomStatus.Running,
+            YourId = yourId,
+            IsAlive = isAlive,
+            Players = players,
+            GamePayload = JsonSerializer.SerializeToNode(payload)
         };
     }
 
@@ -119,22 +176,21 @@ public static class ActionComputationTests
     private static void RulesDrivenUi()
     {
         // 倒计时秒数来自服务端规则。
-        var vote = State(Phases.Vote, Roles.Villager, yourId: 0);
-        vote.Rules = new GameRules { VoteSeconds = 7 };
+        var vote = State(Phases.Vote, Roles.Villager, yourId: 0, rules: new GameRules { VoteSeconds = 7 });
         var voteVm = Apply(vote);
         Check.True(voteVm.CountdownText.Contains("7"), "规则：倒计时采用服务端下发的投票秒数");
 
         // 人数不足时房主不能开始，提示里的最少人数也来自规则。
-        var short3 = State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 3);
-        short3.Rules = new GameRules { MinPlayers = 6 };
+        var short3 = State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 3,
+            rules: new GameRules { MinPlayers = 6 });
         var shortVm = Apply(short3);
         Check.False(shortVm.CanStartGame, "规则：人数不足时房主不能开始");
         Check.True(shortVm.Actions[0].Hint?.Contains("6") == true, "规则：开始提示采用服务端下发的最少人数");
         Check.True(shortVm.StartHint.Contains("6"), "规则：等待提示采用服务端下发的最少人数");
 
         // 人数达标后可开始。
-        var enough = State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 6);
-        enough.Rules = new GameRules { MinPlayers = 6 };
+        var enough = State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 6,
+            rules: new GameRules { MinPlayers = 6 });
         Check.True(Apply(enough).CanStartGame, "规则：人数达标后房主可开始");
 
         // 未下发规则时回退默认（4 人）。
@@ -336,7 +392,7 @@ public static class ActionComputationTests
         var state = State(Phases.Night, Roles.Seer, yourId: 0);
         var vm2 = Apply(state);
         var firstRow = vm2.Players[0];
-        ApplyStateMethod.Invoke(vm2, new object[] { state });
+        vm2.Reapply(state);
         Check.True(ReferenceEquals(firstRow, vm2.Players[0]), "状态：重复推送不重建列表");
 
         // 进入新的一天应清空上一轮的选择
@@ -344,7 +400,7 @@ public static class ActionComputationTests
         vm3.SelectPlayer(vm3.Players.Single(p => p.Id == 1));
         Check.True(vm3.Players.Any(p => p.IsTarget), "状态：第 1 天已选中目标");
 
-        ApplyStateMethod.Invoke(vm3, new object[] { State(Phases.Vote, Roles.Villager, yourId: 0, day: 2) });
+        vm3.Reapply(State(Phases.Vote, Roles.Villager, yourId: 0, day: 2));
         Check.False(vm3.Players.Any(p => p.IsTarget), "状态：新回合清空选中目标");
         Check.False(vm3.Actions.First(a => a.Label == "确认投票").IsEnabled, "状态：新回合重置提交按钮");
 
@@ -356,10 +412,10 @@ public static class ActionComputationTests
 
         // 结束阶段服务器会公开所有身份
         var reveal = State(Phases.GameOver, Roles.Villager, yourId: 0, isAlive: false);
-        reveal.Players[1].Role = Roles.Werewolf;
+        reveal.Players[1].Tag = Roles.Werewolf;
         var vm4 = Apply(reveal);
         var wolfRow = vm4.Players.Single(p => p.Id == 1);
-        Check.True(wolfRow.HasRole, "身份公开：狼人身份可见");
-        Check.True(wolfRow.RoleText.Contains("狼人"), "身份公开：身份文案正确");
+        Check.True(wolfRow.HasTag, "身份公开：狼人身份可见");
+        Check.True(wolfRow.TagText.Contains("狼人"), "身份公开：身份文案正确");
     }
 }

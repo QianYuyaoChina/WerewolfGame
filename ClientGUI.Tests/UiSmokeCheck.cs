@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using ClientGUI.Services;
 using ClientGUI.Views;
+using ClientGUI.Views.Games;
 using Werewolf.Client.Share;
 
 namespace ClientGUI.Tests;
@@ -48,6 +49,10 @@ public static class UiSmokeCheck
                 Try("KeepRoomWindow", () => new KeepRoomWindow());
                 Try("InviteCodeWindow", () => new InviteCodeWindow("WW1:TEST-CODE"));
                 Try("SettingsWindow", () => new SettingsWindow());
+
+                // 游戏操作面板插槽：XAML 能独立解析（DataTemplate 装载目标）。
+                TryElement("WerewolfPanel", () => new WerewolfPanel());
+                TryElement("UnknownGamePanel", () => new UnknownGamePanel());
 
                 ExerciseMainWindow();
 
@@ -211,9 +216,29 @@ public static class UiSmokeCheck
     {
         var state = UiStateStore.State;
 
-        // 主题单选应反映当前偏好。
+        // 设置窗口应反映当前状态（主题单选 + 三栏显隐）
         ThemeManager.SetTheme(AppTheme.Dark);
         var settings = new SettingsWindow();
+
+        // 组织方式：标签页（而不是一整列上下滚动）
+        var tabs = settings.FindName("Tabs") as TabControl;
+        Check.True(tabs != null, "设置：使用标签页组织设置项");
+        if (tabs != null)
+        {
+            Check.Equal(3, tabs.Items.Count, "设置：共 3 个标签页");
+            var headers = tabs.Items.OfType<TabItem>().Select(t => t.Header?.ToString()).ToList();
+            Check.SequenceEqual(new[] { "外观", "主界面", "上次使用" }, headers,
+                "设置：标签页依次为 外观 / 主界面 / 上次使用");
+
+            var switchedAll = true;
+            for (var i = 0; i < tabs.Items.Count; i++)
+            {
+                tabs.SelectedIndex = i;
+                if (((TabControl)settings.FindName("Tabs")!).SelectedIndex != i) switchedAll = false;
+            }
+            Check.True(switchedAll, "设置：三个标签页都能切换");
+            tabs.SelectedIndex = 0;
+        }
         Check.True((settings.FindName("ThemeDark") as RadioButton)?.IsChecked == true,
             "设置：主题单选反映当前偏好（深色）");
 
@@ -427,6 +452,21 @@ public static class UiSmokeCheck
         {
             var window = create();
             Check.True(window != null, $"UI：{name} 可实例化");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"   · {name} 失败：{ex}");
+            Check.True(false, $"UI：{name} 实例化无异常");
+        }
+    }
+
+    /// <summary>实例化一个控件（游戏面板等非窗口元素），只验证 XAML 能被解析。</summary>
+    private static void TryElement(string name, Func<FrameworkElement> create)
+    {
+        try
+        {
+            var element = create();
+            Check.True(element != null, $"UI：{name} 可实例化");
         }
         catch (Exception ex)
         {

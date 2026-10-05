@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Werewolf.Client;
 using Werewolf.Client.Share;
 
 // ---------------- 主程序 ----------------
@@ -216,13 +217,40 @@ class Program
         Console.Write("房间名（回车使用默认名）：");
         string name = (Console.ReadLine() ?? "").Trim();
 
+        // 选择游戏（服务器下发 gamelist；回车默认狼人杀）。
+        string? gameId = GameIds.Werewolf;
+        try
+        {
+            var games = await _client.ListGamesAsync();
+            if (games.Ok && games.Games.Count > 0)
+            {
+                Console.WriteLine("可选游戏：");
+                for (var i = 0; i < games.Games.Count; i++)
+                {
+                    var g = games.Games[i];
+                    Console.WriteLine($"  {i + 1}) {g.Label}　（{g.MinPlayers}-{g.MaxPlayers} 人）");
+                }
+
+                var fallback = games.Games.FirstOrDefault(g => g.GameId == GameIds.Werewolf) ?? games.Games[0];
+                Console.Write($"选择游戏序号（回车默认 {fallback.Label}）：");
+                var pick = (Console.ReadLine() ?? "").Trim();
+                gameId = int.TryParse(pick, out var idx) && idx >= 1 && idx <= games.Games.Count
+                    ? games.Games[idx - 1].GameId
+                    : fallback.GameId;
+            }
+        }
+        catch
+        {
+            // 拉取失败 → 回退默认狼人杀（服务端也会对缺失 gameId 做同样回退）。
+        }
+
         Console.Write("密码（回车表示不设密码）：");
         string pwd = ReadPassword();
         string? password = string.IsNullOrEmpty(pwd) ? null : pwd;
 
         try
         {
-            var rr = await _client.CreateRoomAsync(name, password);
+            var rr = await _client.CreateRoomAsync(name, password, gameId);
             if (!rr.Ok) { Print("❌ 创建失败：" + rr.Message); return false; }
 
             string extra = password == null ? "（公开房间）" : "（加密房间）";
@@ -279,7 +307,10 @@ class Program
             var r = rooms[i];
             string lockMark = r.HasPassword ? " 🔒" : "";
             string host = string.IsNullOrEmpty(r.Host) ? "" : $"   房主:{r.Host}";
-            Print($"  {i + 1}) {r.Id}  {r.Name,-16} {r.PlayerCount}/{r.MaxPlayers}   " +
+            string game = string.IsNullOrWhiteSpace(r.GameName)
+                ? (string.IsNullOrWhiteSpace(r.GameId) ? "—" : r.GameId)
+                : (string.IsNullOrEmpty(r.GameEmoji) ? r.GameName : $"{r.GameEmoji} {r.GameName}");
+            Print($"  {i + 1}) {r.Id}  {game,-14} {r.Name,-16} {r.PlayerCount}/{r.MaxPlayers}   " +
                   $"{RoomStatus.Name(r.Status)}{lockMark}{host}");
         }
     }
@@ -347,52 +378,9 @@ class Program
             return;
         }
 
-        // 女巫专属指令
-        if (s?.Phase == Phases.Night && s.YourRole == Roles.Witch)
-        {
-            if (line.Equals("heal", StringComparison.OrdinalIgnoreCase))
-            {
-                await _client.NightActionAsync(-2, "heal");
-                Print("✅ 已使用解药");
-                return;
-            }
-            if (line.Equals("none", StringComparison.OrdinalIgnoreCase))
-            {
-                await _client.NightActionAsync(-1, "none");
-                Print("✅ 今晚不使用药水");
-                return;
-            }
-            if (line.StartsWith("poison ", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(line[7..].Trim(), out int pid))
-            {
-                await _client.NightActionAsync(pid, "poison");
-                Print($"✅ 已使用毒药 → [{pid}]");
-                return;
-            }
-        }
-
-        // 纯数字 → 阶段化指令
-        if (int.TryParse(line, out int id))
-        {
-            switch (s?.Phase)
-            {
-                case Phases.Night:
-                    await _client.NightActionAsync(id, "do");
-                    Print($"✅ 已选择 [{id}]");
-                    return;
-                case Phases.Vote:
-                    await _client.VoteAsync(id);
-                    Print(id < 0 ? "✅ 已弃票" : $"✅ 已投票 → [{id}]");
-                    return;
-                case Phases.HunterShoot:
-                    await _client.HunterShotAsync(id);
-                    Print(id < 0 ? "✅ 放弃开枪" : $"✅ 开枪 → [{id}]");
-                    return;
-                default:
-                    Print("⚠️ 当前阶段不能选择目标。");
-                    return;
-            }
-        }
+        // 本房间当前游戏的操作指令（数字 / heal / poison / none 等）委派给对应游戏模块。
+        var module = ConsoleGameRegistry.Resolve(s?.GameId);
+        if (await module.TryHandleAsync(line, s, _client)) return;
 
         Print("⚠️ 未知指令，输入 help 查看帮助。");
     }
@@ -406,27 +394,13 @@ class Program
 
     static void RenderState(GameStateDto s)
     {
+        var module = ConsoleGameRegistry.Resolve(s.GameId);
         lock (ConsoleLock)
         {
             Console.WriteLine();
-            string roomHeader = string.IsNullOrEmpty(s.RoomId)
-                ? ""
-                : $" · 房间 {s.RoomId}";
-            Console.WriteLine($"┌─────────── 第 {s.Day} 天 · {Phases.DisplayName(s.Phase)}{roomHeader} ───────────");
-            var me = s.Players.FirstOrDefault(p => p.IsYou);
-            Console.WriteLine($"│ 你：[{s.YourId}] {me?.Name}　身份：{s.YourRole}　{(s.IsAlive ? "存活" : "已出局")}");
-            if (!string.IsNullOrEmpty(s.RoomName) || !string.IsNullOrEmpty(s.HostName))
-                Console.WriteLine($"│ 房间：{s.RoomName}　房主：{s.HostName}");
-            Console.WriteLine("│ 玩家列表：");
-            foreach (var p in s.Players)
-            {
-                string role = p.Role != null ? $" <{p.Role}>" : "";
-                string you = p.IsYou ? " ←你" : "";
-                string host = p.IsHost ? " 👑" : "";
-                string dc = p.IsConnected ? "" : " ⚠掉线";
-                string dead = p.IsAlive ? "" : "（死亡）";
-                Console.WriteLine($"│   [{p.Id}] {p.Name}{dead}{role}{host}{you}{dc}");
-            }
+            string roomHeader = string.IsNullOrEmpty(s.RoomId) ? "" : $" · 房间 {s.RoomId}";
+            Console.WriteLine($"┌─────────── {module.RoomHeader(s)}{roomHeader} ───────────");
+            Console.WriteLine(module.RenderState(s));
             Console.WriteLine("└──────────────────────────────────────");
         }
     }
@@ -439,18 +413,18 @@ class Program
   invite             生成邀请码（好友粘贴后可直接进本房间，含密码）
   leave              退出当前房间，返回房间列表
                        （房主且房间只剩你时，会直接关闭该房间）
-  数字 (如 3)        夜间选择目标 / 投票 / 猎人开枪
-  -1                 弃票 / 放弃开枪
   chat 内容          发言
-  heal               女巫使用解药
-  poison 3           女巫毒杀 3 号
-  none               女巫今晚不用药
-  help               显示本帮助
+  help               显示本帮助");
 
+        // 追加当前游戏的私有指令帮助。
+        var extra = ConsoleGameRegistry.Resolve(_state?.GameId).HelpText;
+        if (!string.IsNullOrWhiteSpace(extra)) Print(extra);
+
+        Print(@"
 ──────────── 房间列表 ────────────
   序号 (如 2)        加入对应房间（加密房会要求输入密码）
   j                  用邀请码加入（无需再输密码）
-  c                  创建房间（可设置密码）
+  c                  创建房间（可选择游戏，可设置密码）
   r                  刷新列表
   q                  退出程序
 

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Werewolf.Client.Share;
 
 namespace ClientGUI.Tests;
@@ -9,6 +11,8 @@ namespace ClientGUI.Tests;
 /// </summary>
 public static class BotMode
 {
+    private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
+
     private sealed class Bot
     {
         public required string Name { get; init; }
@@ -92,11 +96,14 @@ public static class BotMode
 
     private static void OnState(Bot bot, GameStateDto state)
     {
+        var wf = state.GamePayload?.Deserialize<WerewolfGameState>(Json);
+        if (wf == null) return;
+
         var me = state.Players.FirstOrDefault(p => p.IsYou);
 
         // 房主机器人：凑够 4 人自动开局
         if (!bot.RequestedStart && me is { IsHost: true } && state.Players.Count >= 4
-            && state.Phase is Phases.Waiting or Phases.GameOver)
+            && wf.Phase is Phases.Waiting or Phases.GameOver)
         {
             bot.RequestedStart = true;
             _ = Fire(bot, "开局", async () =>
@@ -108,28 +115,30 @@ public static class BotMode
         }
 
         // 出局玩家只有猎人开枪阶段还需要行动
-        if (!state.IsAlive && state.Phase != Phases.HunterShoot) return;
+        if (!state.IsAlive && wf.Phase != Phases.HunterShoot) return;
 
-        var key = $"{state.Day}:{state.Phase}";
+        var key = $"{wf.Day}:{wf.Phase}";
         if (bot.ActedKey == key) return;
 
-        switch (state.Phase)
+        switch (wf.Phase)
         {
             case Phases.Night:
                 bot.ActedKey = key;
-                _ = Fire(bot, "夜间", () => NightAction(bot, state));
+                _ = Fire(bot, "夜间", () => NightAction(bot, state, wf));
                 break;
 
             case Phases.Vote:
                 bot.ActedKey = key;
                 var voteTarget = PickTarget(bot, state, allowSelf: false);
-                _ = Fire(bot, "投票", () => bot.Client.VoteAsync(voteTarget));
+                _ = Fire(bot, "投票", () => bot.Client.CallGameOpAsync(WerewolfOps.Vote,
+                    JsonSerializer.SerializeToNode(new TargetPayload { TargetId = voteTarget })));
                 break;
 
-            case Phases.HunterShoot when state.YourRole == Roles.Hunter:
+            case Phases.HunterShoot when wf.YourRole == Roles.Hunter:
                 bot.ActedKey = key;
                 var shot = PickTarget(bot, state, allowSelf: false);
-                _ = Fire(bot, "开枪", () => bot.Client.HunterShotAsync(shot));
+                _ = Fire(bot, "开枪", () => bot.Client.CallGameOpAsync(WerewolfOps.Hunter,
+                    JsonSerializer.SerializeToNode(new TargetPayload { TargetId = shot })));
                 break;
 
             case Phases.Discussion:
@@ -139,18 +148,20 @@ public static class BotMode
         }
     }
 
-    private static async Task NightAction(Bot bot, GameStateDto state)
+    private static async Task NightAction(Bot bot, GameStateDto state, WerewolfGameState wf)
     {
         var target = PickTarget(bot, state, allowSelf: false);
-        switch (state.YourRole)
+        switch (wf.YourRole)
         {
             case Roles.Witch:
-                await bot.Client.NightActionAsync(-2, "heal");
+                await bot.Client.CallGameOpAsync(WerewolfOps.Night,
+                    JsonSerializer.SerializeToNode(new NightPayload { TargetId = -2, Action = "heal" }));
                 break;
             case Roles.Werewolf:
             case Roles.Seer:
             case Roles.Guard:
-                await bot.Client.NightActionAsync(target, "do");
+                await bot.Client.CallGameOpAsync(WerewolfOps.Night,
+                    JsonSerializer.SerializeToNode(new NightPayload { TargetId = target, Action = "do" }));
                 break;
         }
     }

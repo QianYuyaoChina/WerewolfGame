@@ -1,0 +1,137 @@
+%% =====================================================================
+%% 多游戏可插拔架构 · 时序图（sequence-diagram）
+%% 配套文档：ARCHITECTURE.md
+%% 含 3 张时序图：①创建指定游戏房间并开局 ②浏览→加入→按游戏装载面板
+%%              ③断线重连（含主动拉取状态）
+%% =====================================================================
+
+%% ---------------------------------------------------------------------
+%% ① 创建指定游戏的房间并开局
+%% ---------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    participant U as 房主(GUI/控制台)
+    participant C as GameClient
+    participant H as GameHub
+    participant M as RoomManager
+    participant R as GameRoom
+    participant G as IGameInstance(狼人)
+
+    U->>C: 创建房间(name, pwd, gameId="werewolf")
+    C->>H: Call(createroom, {Name,Password,GameId})
+    H->>H: 校验已登录
+    H->>M: CreateRoom(conn, name, pwd, gameId)
+    M->>M: ResolveOrDefault(gameId) -> werewolf
+    alt 未知游戏
+        M-->>H: (false, "该游戏不可用")
+        H-->>C: RpcReply.Error("该游戏不可用")
+        C-->>U: 提示创建失败
+    else 已知游戏
+        M->>M: catalog.Describe(gameId) 取 MaxPlayers
+        M->>R: new GameRoom(..., gameId, factory)
+        R->>G: factory(this) 创建实例
+        M->>R: AddOrReconnect(host, conn)
+        M-->>H: (true, roomId)
+        H->>R: BroadcastAsync / BroadcastStateAsync
+        H-->>C: RoomActionResult{RoomId, Room(GameId/GameName/Emoji)}
+        C-->>U: 进入房间（标题栏显示 🐺 狼人杀）
+    end
+
+    Note over U,G: —— 房主点「开始游戏」——
+    U->>C: StartGame()
+    C->>H: Call(start)
+    H->>R: StartGame(conn)
+    R->>R: 校验房主 / 清理掉线玩家
+    R->>G: Start()
+    G->>G: 校验人数下限 / 初始化本局 / Status=Running
+    G-->>R: (true, "")
+    R->>G: Task.Run(RunAsync()) 启动主循环
+    R-->>H: (true, "")
+    H-->>C: RpcReply.Success
+    G->>R: ctx.BroadcastStateAsync()（各自视角）
+    R->>C: Push(state: 通用字段 + GamePayload + Tag)
+
+%% ---------------------------------------------------------------------
+%% ② 浏览列表 -> 加入 -> 按游戏装载面板
+%% ---------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    participant U as 玩家(GUI)
+    participant LV as RoomListViewModel
+    participant CV as CreateRoomViewModel
+    participant C as GameClient
+    participant H as GameHub
+    participant M as RoomManager
+    participant GV as GameViewModel(宿主)
+    participant F as GameViewModelFactory
+    participant P as WerewolfViewModel/面板
+
+    U->>LV: 打开房间列表
+    LV->>C: ListRoomsAsync()
+    C->>H: Call(roomlist)
+    H->>M: List()
+    M-->>H: List~RoomInfoDto~(含 GameId/GameName/Emoji)
+    H-->>C: RoomListResult
+    C-->>LV: 渲染「游戏」列
+    U->>CV: 打开创建房间对话框
+    CV->>C: ListGamesAsync()
+    C->>H: Call(gamelist)
+    H-->>C: GameListResult(可用游戏)
+    C-->>CV: 下拉（默认狼人杀）
+
+    U->>LV: 选中房间 -> 加入
+    LV->>C: JoinRoomAsync(roomId, pwd)
+    C->>H: Call(joinroom)
+    H->>M: JoinRoom(...)
+    M->>M: 命中本房玩家->重连跳过密码；否则校验密码
+    M-->>H: (ok, roomId, reconnected)
+    H-->>C: RoomActionResult
+    C-->>LV: RoomEntered -> 打开 MainWindow
+    GV->>C: RefreshStateAsync()
+    C->>H: Call(roomstate)
+    H-->>C: GameStateDto(通用 + GamePayload)
+    C-->>GV: StateReceived
+    GV->>F: Create(state.GameId, bridge)
+    F-->>GV: WerewolfViewModel
+    GV->>P: OnState(state)（解析 GamePayload -> Actions/Chips/Hint）
+    GV->>P: 绑定插槽 DataTemplate（WerewolfPanel）
+    P-->>U: 显示狼人杀面板（既有观感）
+
+%% ---------------------------------------------------------------------
+%% ③ 断线重连（含主动拉取状态）
+%% ---------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    participant U as 玩家
+    participant C as GameClient
+    participant H as GameHub
+    participant M as RoomManager
+    participant R as GameRoom
+    participant GV as GameViewModel(宿主)
+    participant P as WerewolfViewModel
+
+    Note over C: 网络中断 -> SignalR 自动重连（得到新 ConnectionId）
+    C->>H: Handshake + Confirm（重新协商密钥）
+    C->>H: Call(join, {username, password})
+    H->>M: BindIdentity(conn, username)
+    C->>H: Call(joinroom, {roomId, password(内存态)})
+    H->>M: JoinRoom(roomId, conn, pwd)
+    M->>R: AddOrReconnect(username, conn)
+    alt 命中本房玩家（局中）
+        R-->>M: (true, reconnected=true)
+        M-->>H: (ok, reconnected=true)
+        H->>R: 房主若掉线 -> 转让；广播「重新连接」
+        H-->>C: RoomActionResult{reconnected=true}
+    else 不在名单 / 已结束
+        R-->>M: 依状态决定（同名在线冲突返回错误）
+    end
+    Note over GV: 新界面加载
+    GV->>C: RefreshStateAsync()
+    C->>H: Call(roomstate)
+    H->>R: SnapshotFor(conn)
+    R->>R: 组装通用 DTO + BuildPayload + DecoratePlayers
+    R-->>H: GameStateDto
+    H-->>C: GameStateDto
+    C-->>GV: StateReceived
+    GV->>P: OnState(state)（补齐身份/阶段/按钮）
+    Note over R: 局中重连时，游戏可经 ctx.PrivateAsync 补发身份私聊

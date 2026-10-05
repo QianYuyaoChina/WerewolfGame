@@ -2,21 +2,23 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using ClientGUI.ViewModels;
+using Werewolf.Client.Share;
 
 namespace ClientGUI.Views;
 
 /// <summary>
-/// 创建房间对话框：房间名（可留空）+ 可选密码（勾选「不设密码」即公开房间）。
-/// 确认后 <see cref="Window.DialogResult"/> 为 true，调用方读取 <see cref="RoomName"/> / <see cref="Password"/>。
+/// 创建房间对话框：选择游戏（默认狼人杀）+ 房间名（可留空）+ 可选密码（勾选「不设密码」即公开房间）。
+/// 确认后 <see cref="Window.DialogResult"/> 为 true，调用方读取 <see cref="RoomName"/> / <see cref="Password"/> / <see cref="SelectedGameId"/>。
 /// </summary>
 public partial class CreateRoomWindow : Window
 {
-    private readonly CreateRoomViewModel _vm = new();
+    private readonly CreateRoomViewModel _vm;
 
-    public CreateRoomWindow()
+    public CreateRoomWindow(GameClient? session = null)
     {
         InitializeComponent();
 
+        _vm = new CreateRoomViewModel(session);
         DataContext = _vm;
 
         _vm.PropertyChanged += (_, e) =>
@@ -29,7 +31,11 @@ public partial class CreateRoomWindow : Window
         };
         _vm.CreateSucceeded += OnCreateSucceeded;
 
-        Loaded += (_, _) => RoomNameInput.Focus();
+        Loaded += async (_, _) =>
+        {
+            await _vm.LoadGamesAsync();
+            RoomNameInput.Focus();
+        };
     }
 
     /// <summary>房间名（可留空 → 服务端回退默认名）。</summary>
@@ -37,6 +43,9 @@ public partial class CreateRoomWindow : Window
 
     /// <summary>房间密码；勾选「不设密码」时返回 null。</summary>
     public string? Password => _vm.NoPassword || string.IsNullOrEmpty(_vm.Password) ? null : _vm.Password;
+
+    /// <summary>选中的游戏机器名（默认狼人杀）。</summary>
+    public string SelectedGameId => _vm.SelectedGameId;
 
     private void OnCreateSucceeded()
     {

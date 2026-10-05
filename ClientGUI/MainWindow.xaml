@@ -102,17 +102,22 @@
                         <TextBlock Text="{Binding RoomHeaderText}" FontSize="12.5" FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextBrush}" />
                     </Border>
-                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
-                        <TextBlock Text="{Binding DayText}" FontSize="12.5" Foreground="{DynamicResource TextBrush}" />
-                    </Border>
-                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
-                        <TextBlock Text="{Binding PhaseDisplay}" FontSize="12.5" FontWeight="SemiBold"
-                                   Foreground="{Binding PhaseBrush}" />
-                    </Border>
-                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
-                            Visibility="{Binding HasCountdown, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="{Binding CountdownText}" FontSize="12.5" Foreground="{DynamicResource PrivateBrush}" />
-                    </Border>
+                    <!-- 游戏自定义状态胶囊（阶段 / 天数 / 倒计时等）：由插槽面板 Game.Chips 提供 -->
+                    <ItemsControl ItemsSource="{Binding Game.Chips}" VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:StatusChip}">
+                                <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
+                                    <TextBlock Text="{Binding Text}" FontSize="12.5" FontWeight="SemiBold"
+                                               Foreground="{Binding ColorHex, Converter={StaticResource HexToBrush}}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
                             BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}">
                         <TextBlock Text="{Binding ConnectionStatus}" FontSize="12" Foreground="{DynamicResource MutedBrush}" />

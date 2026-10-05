@@ -300,13 +300,24 @@ public sealed class GameClient : IAsyncDisposable
         return result;
     }
 
-    /// <summary>创建房间并成为房主；密码为空/null 即公开房间。</summary>
-    public async Task<RoomResult> CreateRoomAsync(string name, string? password)
+    /// <summary>查询服务器当前可用游戏（gamelist）。</summary>
+    public async Task<GameListResult> ListGamesAsync()
+    {
+        var reply = await CallAsync(Ops.GameList);
+        if (!reply.Ok) return new GameListResult { Ok = false, Msg = reply.Msg, Games = new() };
+
+        return reply.Payload?.Deserialize<GameListResult>(JsonOptions)
+               ?? new GameListResult { Ok = false, Msg = ServerMessages.GameListFailed };
+    }
+
+    /// <summary>创建房间并成为房主；密码为空/null 即公开房间；gameId 为 null/空白 → 服务端回退狼人杀。</summary>
+    public async Task<RoomResult> CreateRoomAsync(string name, string? password, string? gameId = null)
     {
         var reply = await CallAsync(Ops.CreateRoom, Node(new CreateRoomPayload
         {
             Name = name ?? "",
-            Password = password
+            Password = password,
+            GameId = gameId
         }));
 
         var result = ApplyRoomReply(reply);
@@ -423,15 +434,22 @@ public sealed class GameClient : IAsyncDisposable
         return new JoinResult { ok = reply.Ok, msg = reply.Msg };
     }
 
-    /// <summary>夜间行动。action: "do"（通用）/"heal"/"poison"/"none"。</summary>
-    public Task NightActionAsync(int targetId, string action = "do")
-        => CallAsync(Ops.Night, Node(new NightPayload { TargetId = targetId, Action = action }));
+    /// <summary>
+    /// 调用「本房间当前游戏」的一次操作（框架只透传，不理解 op 语义）。
+    /// 具体 op 名与 payload 由各游戏模块声明，例如狼人杀的
+    /// <c>WerewolfOps.Night</c> / <c>WerewolfOps.Vote</c> / <c>WerewolfOps.Hunter</c>。
+    /// </summary>
+    public Task<JoinResult> CallGameOpAsync(string op, JsonNode? payload = null)
+    {
+        var replyTask = CallAsync(op, payload);
+        return AwaitReplyAsync(replyTask);
+    }
 
-    public Task VoteAsync(int targetId)
-        => CallAsync(Ops.Vote, Node(new TargetPayload { TargetId = targetId }));
-
-    public Task HunterShotAsync(int targetId)
-        => CallAsync(Ops.Hunter, Node(new TargetPayload { TargetId = targetId }));
+    private static async Task<JoinResult> AwaitReplyAsync(Task<RpcReply> replyTask)
+    {
+        var reply = await replyTask;
+        return new JoinResult { ok = reply.Ok, msg = reply.Msg };
+    }
 
     public Task ChatAsync(string text)
         => CallAsync(Ops.Chat, Node(new ChatPayload { Text = text }));

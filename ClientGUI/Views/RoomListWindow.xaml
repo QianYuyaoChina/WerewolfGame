@@ -69,6 +69,7 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="84" />
+                    <ColumnDefinition Width="120" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="84" />
                     <ColumnDefinition Width="110" />
@@ -76,11 +77,12 @@
                     <ColumnDefinition Width="128" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="房间号" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
-                <TextBlock Grid.Column="1" Text="房间名" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
-                <TextBlock Grid.Column="2" Text="人数" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
-                <TextBlock Grid.Column="3" Text="状态" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
-                <TextBlock Grid.Column="4" Text="加密" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
-                <TextBlock Grid.Column="5" Text="房主" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="1" Text="游戏" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="2" Text="房间名" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="3" Text="人数" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="4" Text="状态" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="5" Text="加密" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
+                <TextBlock Grid.Column="6" Text="房主" Style="{StaticResource MutedText}" FontWeight="SemiBold" />
             </Grid>
         </Border>
 
@@ -124,6 +126,7 @@
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="84" />
+                                <ColumnDefinition Width="120" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="84" />
                                 <ColumnDefinition Width="110" />
@@ -132,16 +135,19 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="{Binding Id}" FontSize="13" FontWeight="SemiBold"
                                        Foreground="{DynamicResource TextSoftBrush}" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13.5"
+                            <TextBlock Grid.Column="1" Text="{Binding GameText}" FontSize="12.5"
+                                       TextTrimming="CharacterEllipsis" Foreground="{DynamicResource AccentBrush}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="{Binding Name}" FontSize="13.5"
                                        TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"
                                        VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="2" Text="{Binding CountText}" FontSize="12.5"
+                            <TextBlock Grid.Column="3" Text="{Binding CountText}" FontSize="12.5"
                                        Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="3" Text="{Binding StatusText}" FontSize="12.5"
+                            <TextBlock Grid.Column="4" Text="{Binding StatusText}" FontSize="12.5"
                                        Foreground="{DynamicResource PhaseBrush}" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="4" Text="{Binding LockText}" FontSize="12.5"
+                            <TextBlock Grid.Column="5" Text="{Binding LockText}" FontSize="12.5"
                                        Foreground="{DynamicResource PrivateBrush}" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="5" Text="{Binding HostText}" FontSize="12.5"
+                            <TextBlock Grid.Column="6" Text="{Binding HostText}" FontSize="12.5"
                                        TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}"
                                        VerticalAlignment="Center" />
                         </Grid>

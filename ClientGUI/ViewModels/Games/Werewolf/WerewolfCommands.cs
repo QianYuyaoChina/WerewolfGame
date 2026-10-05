@@ -1,12 +1,12 @@
 using System.Windows.Input;
 
-namespace ClientGUI.ViewModels;
+namespace ClientGUI.ViewModels.Games.Werewolf;
 
 /// <summary>
-/// 操作面板用到的命令集合。视图模型只创建一次，供 <see cref="GameActionFactory"/>
+/// 狼人杀操作面板用到的命令集合。视图模型只创建一次，供 <see cref="WerewolfActionFactory"/>
 /// 在每次刷新时复用（也可以让异步命令的“执行中禁用”状态跨刷新保持）。
 /// </summary>
-public sealed class GameCommands
+public sealed class WerewolfCommands
 {
     /// <summary>房主开始游戏。</summary>
     public required ICommand StartGame { get; init; }

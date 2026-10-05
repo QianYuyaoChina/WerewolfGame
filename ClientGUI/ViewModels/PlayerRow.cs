@@ -3,7 +3,7 @@ using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
 
-/// <summary>玩家列表中的一行（左侧面板）。</summary>
+/// <summary>玩家列表中的一行（左侧面板）。平台只提供通用字段；游戏自定义标签由 <see cref="Tag"/> / <see cref="TagColor"/> 承载。</summary>
 public sealed class PlayerRow : ObservableObject
 {
     private bool _selectable;
@@ -15,7 +15,12 @@ public sealed class PlayerRow : ObservableObject
     public bool IsHost { get; init; }
     public bool IsYou { get; init; }
     public bool IsConnected { get; init; } = true;
-    public string? Role { get; init; }
+
+    /// <summary>游戏自定义短标签（狼人杀 = 身份名，如「狼人」）；无标签为 null。</summary>
+    public string? Tag { get; init; }
+
+    /// <summary>标签颜色（十六进制，如 "#FFA07A"）；为空则用主题默认色。</summary>
+    public string? TagColor { get; init; }
 
     /// <summary>当前阶段是否可以点选该玩家作为目标。</summary>
     public bool Selectable
@@ -51,8 +56,14 @@ public sealed class PlayerRow : ObservableObject
     public string Badge => $"[{Id}]";
     public string Slot => Id.ToString();
 
-    public string RoleText => Role is { Length: > 0 } r ? Roles.Emoji(r) + " " + r : "";
-    public bool HasRole => Role is { Length: > 0 };
+    /// <summary>标签文案（无标签为空串）。</summary>
+    public string TagText => Tag ?? "";
+
+    /// <summary>是否有可展示的游戏标签。</summary>
+    public bool HasTag => !string.IsNullOrEmpty(Tag);
+
+    /// <summary>标签画刷：按 <see cref="TagColor"/> 解析，缺省用主题弱化色。</summary>
+    public Brush TagBrush => UiBrushes.FromHex(TagColor, UiBrushes.Muted);
 
     public string Tags
     {
@@ -68,17 +79,6 @@ public sealed class PlayerRow : ObservableObject
     }
 
     public bool HasTags => Tags.Length > 0;
-
-    public Brush RoleBrush => Role switch
-    {
-        Roles.Werewolf => Brushes.Salmon,
-        Roles.Seer => Brushes.MediumPurple,
-        Roles.Witch => Brushes.MediumSpringGreen,
-        Roles.Hunter => Brushes.SandyBrown,
-        Roles.Guard => Brushes.LightSkyBlue,
-        Roles.Villager => Brushes.Gainsboro,
-        _ => Brushes.Gray
-    };
 
     // 画刷统一从 UiBrushes 取缓存实例：行样式会在每次布局测量时被读取，不能每次 new。
     public Brush RowBackground => !IsAlive

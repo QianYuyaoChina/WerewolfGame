@@ -191,12 +191,14 @@ public static class IntegrationProbe
 
             // ---------- 9.2 B 房不受 A 房开局影响 ----------
             var eveState = StateOf("eve");
+            var evePayload = eveState?.GamePayload?.Deserialize<WerewolfGameState>(
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (eveState != null && eveState.Players.Count == 2
-                && eveState.Phase is Phases.Waiting or Phases.GameOver
+                && evePayload?.Phase is Phases.Waiting or Phases.GameOver
                 && eveState.RoomId == roomB.RoomId)
                 Pass("B 房保持自身状态（未受 A 房开局影响）");
             else
-                Fail($"B 房状态异常：{eveState?.Phase}/{eveState?.Players.Count}");
+                Fail($"B 房状态异常：{evePayload?.Phase}/{eveState?.Players.Count}");
 
             // ---------- 9.3 心跳 ----------
             try
@@ -211,31 +213,41 @@ public static class IntegrationProbe
             }
 
             // ---------- 9.4 JSON 契约：用服务器传来的形状反序列化 ----------
+            // 多游戏改造后 GameStateDto 通用化：阶段/天数/身份等迁入狼人杀私有负载 GamePayload。
             var wire = JsonNode.Parse("""
             {
-              "Phase": "Night",
-              "Day": 2,
-              "YourId": 1,
-              "YourRole": "狼人",
-              "YourRoleDesc": "夜晚与队友共同击杀一名玩家，白天伪装成好人。",
-              "IsAlive": true,
+              "GameId": "werewolf",
               "RoomId": "ABCDE",
               "RoomName": "新手房",
               "HostName": "alice",
+              "Running": true,
+              "Status": "Running",
+              "YourId": 1,
+              "IsAlive": true,
               "Players": [
-                { "Id": 0, "Name": "alice", "IsAlive": true, "IsHost": true, "IsYou": false, "IsConnected": true, "Role": "狼人" },
-                { "Id": 1, "Name": "bob", "IsAlive": false, "IsHost": false, "IsYou": true, "IsConnected": false, "Role": null }
-              ]
+                { "Id": 0, "Name": "alice", "IsAlive": true, "IsHost": true, "IsYou": false, "IsConnected": true, "Tag": "狼人", "TagColor": "#FFA07A" },
+                { "Id": 1, "Name": "bob", "IsAlive": false, "IsHost": false, "IsYou": true, "IsConnected": false, "Tag": null }
+              ],
+              "GamePayload": {
+                "Phase": "Night",
+                "Day": 2,
+                "YourRole": "狼人",
+                "YourRoleDesc": "夜晚与队友共同击杀一名玩家，白天伪装成好人。",
+                "ActingRole": "狼人"
+              }
             }
             """);
 
-            var parsed = wire.Deserialize<GameStateDto>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (parsed is { Phase: "Night", Day: 2, YourId: 1, YourRole: "狼人", IsAlive: true }
-                && parsed.RoomId == "ABCDE" && parsed.RoomName == "新手房" && parsed.HostName == "alice"
+            var opt = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var parsed = wire.Deserialize<GameStateDto>(opt);
+            var parsedPayload = parsed?.GamePayload?.Deserialize<WerewolfGameState>(opt);
+            if (parsed is { YourId: 1, IsAlive: true, RoomId: "ABCDE", RoomName: "新手房", HostName: "alice" }
+                && parsed.GameId == GameIds.Werewolf && parsed.Running
                 && parsed.Players.Count == 2
-                && parsed.Players[0] is { Id: 0, Name: "alice", IsHost: true, IsYou: false, IsConnected: true, Role: "狼人" }
-                && parsed.Players[1] is { IsAlive: false, IsYou: true, IsConnected: false, Role: null })
-                Pass("DTO 与服务器 JSON 形状匹配（含房间字段 / null Role / 断线标记）");
+                && parsed.Players[0] is { Id: 0, Name: "alice", IsHost: true, IsYou: false, IsConnected: true, Tag: "狼人", TagColor: "#FFA07A" }
+                && parsed.Players[1] is { IsAlive: false, IsYou: true, IsConnected: false, Tag: null }
+                && parsedPayload is { Phase: "Night", Day: 2, YourRole: "狼人" })
+                Pass("DTO 与服务器 JSON 形状匹配（通用信封 + 狼人杀 GamePayload / null Tag / 断线标记）");
             else
                 Fail("DTO 反序列化结果与预期不符");
 

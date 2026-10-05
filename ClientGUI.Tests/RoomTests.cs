@@ -98,12 +98,12 @@ public static class RoomTests
             mgr.BindIdentity(conn, user);
 
         // 未登录（未绑定身份）不能建房。
-        var anon = mgr.CreateRoom("c-anon", "x", null);
+        var anon = mgr.CreateRoom("c-anon", "x", null, GameIds.Werewolf);
         Check.False(anon.ok, "注册表：未登录不能创建房间");
         Check.Equal(ServerMessages.NotLoggedIn, anon.msg, "注册表：未登录建房返回统一文案");
 
         // 建房并成为房主。
-        var created = mgr.CreateRoom("c-host", "新手房", "123");
+        var created = mgr.CreateRoom("c-host", "新手房", "123", GameIds.Werewolf);
         Check.True(created.ok, "注册表：创建房间成功");
         Check.Equal(RoomId.Length, created.roomId.Length, "注册表：房间号为 5 位");
         Check.Equal(1, mgr.List().Count, "注册表：列表包含 1 个房间");
@@ -141,7 +141,7 @@ public static class RoomTests
         Check.Equal(ServerMessages.RoomNotFound, none.msg, "注册表：房间不存在返回统一文案");
 
         // 公开房间（无密码）无需密码即可加入。
-        var pub = mgr.CreateRoom("c-eve", "公开房", null);
+        var pub = mgr.CreateRoom("c-eve", "公开房", null, GameIds.Werewolf);
         Check.True(pub.ok, "注册表：创建公开房间成功");
         Check.False(mgr.Find(pub.roomId)!.HasPassword, "注册表：公开房间 HasPassword=false");
         Check.Equal(2, mgr.List().Count, "注册表：列表包含 2 个房间");
@@ -161,7 +161,7 @@ public static class RoomTests
                  })
             mgr.BindIdentity(conn, user);
 
-        var room0 = mgr.CreateRoom("c-host", "满员房", "123");
+        var room0 = mgr.CreateRoom("c-host", "满员房", "123", GameIds.Werewolf);
         Check.True(room0.ok, "注册表：满员测试建房成功");
         var roomId = room0.roomId;
 
@@ -202,7 +202,7 @@ public static class RoomTests
         // 宽限期 0 秒：**掉线**留下的空房在扫描时立即被回收（主动退房不走这条路，见下）。
         var mgr = NewManager(graceSeconds: 0);
         mgr.BindIdentity("c1", "u1");
-        var created = mgr.CreateRoom("c1", "待回收房", null);
+        var created = mgr.CreateRoom("c1", "待回收房", null, GameIds.Werewolf);
         Check.True(created.ok, "回收：建房成功");
 
         mgr.LeaveByConnection("c1");   // 掉线 → 房间无在线玩家，但仍先等待宽限期
@@ -217,7 +217,7 @@ public static class RoomTests
         // 宽限期很长：不回收。
         var mgr2 = NewManager(graceSeconds: 3600);
         mgr2.BindIdentity("c2", "u2");
-        var created2 = mgr2.CreateRoom("c2", "保留房", null);
+        var created2 = mgr2.CreateRoom("c2", "保留房", null, GameIds.Werewolf);
         mgr2.LeaveByConnection("c2");
         Check.Equal(0, mgr2.RecycleExpired(), "回收：宽限期内不回收");
         Check.True(mgr2.Find(created2.roomId) != null, "回收：宽限期内房间仍在列表");
@@ -225,7 +225,7 @@ public static class RoomTests
         // 主动退出（leaveroom）且不保留 → 立即关闭，不必等宽限期。
         var mgr3 = NewManager(graceSeconds: 3600);
         mgr3.BindIdentity("c3", "u3");
-        var created3 = mgr3.CreateRoom("c3", "主动退房", null);
+        var created3 = mgr3.CreateRoom("c3", "主动退房", null, GameIds.Werewolf);
         var left = mgr3.LeaveRoom("c3");
         Check.True(left.roomClosed, "回收：主动退出且不保留 → 立即关闭房间");
         Check.True(mgr3.Find(created3.roomId) == null, "回收：关闭后房间不在列表中");
@@ -242,7 +242,7 @@ public static class RoomTests
         foreach (var (conn, user) in new[] { ("c-a", "alpha"), ("c-b", "bravo"), ("c-c", "charlie") })
             mgr.BindIdentity(conn, user);
 
-        var created = mgr.CreateRoom("c-a", "转让房", null);
+        var created = mgr.CreateRoom("c-a", "转让房", null, GameIds.Werewolf);
         Check.True(created.ok, "转让：建房成功");
         var roomId = created.roomId;
 
@@ -272,7 +272,7 @@ public static class RoomTests
                  { ("h", "host"), ("p1", "p1"), ("p2", "p2"), ("p3", "p3") })
             mgr2.BindIdentity(conn, user);
 
-        var r2 = mgr2.CreateRoom("h", "对局房", null);
+        var r2 = mgr2.CreateRoom("h", "对局房", null, GameIds.Werewolf);
         mgr2.JoinRoom(r2.roomId, "p1", null);
         mgr2.JoinRoom(r2.roomId, "p2", null);
         mgr2.JoinRoom(r2.roomId, "p3", null);
@@ -297,7 +297,7 @@ public static class RoomTests
         // ① 单人房主选择「保留」→ 房间仍在，回收扫描也动不了它。
         var mgr = NewManager(graceSeconds: 0);
         mgr.BindIdentity("h", "host");
-        var created = mgr.CreateRoom("h", "保留房", "pw");
+        var created = mgr.CreateRoom("h", "保留房", "pw", GameIds.Werewolf);
         var roomId = created.roomId;
 
         var keep = mgr.LeaveRoom("h", keepRoom: true);
@@ -321,7 +321,7 @@ public static class RoomTests
         // ③ 单人房主选择「不保留」→ 立即关闭。
         var mgr2 = NewManager();
         mgr2.BindIdentity("h2", "host2");
-        var created2 = mgr2.CreateRoom("h2", "临时房", null);
+        var created2 = mgr2.CreateRoom("h2", "临时房", null, GameIds.Werewolf);
         var closed = mgr2.LeaveRoom("h2", keepRoom: false);
         Check.True(closed.roomClosed, "关闭：房主不保留 → 房间被关闭");
         Check.True(mgr2.Find(created2.roomId) == null, "关闭：房间已从列表移除");
@@ -331,7 +331,7 @@ public static class RoomTests
         var mgr3 = NewManager();
         mgr3.BindIdentity("h3", "host3");
         mgr3.BindIdentity("g3", "guest3");
-        var created3 = mgr3.CreateRoom("h3", "有人房", null);
+        var created3 = mgr3.CreateRoom("h3", "有人房", null, GameIds.Werewolf);
         mgr3.JoinRoom(created3.roomId, "g3", null);
 
         var leaveWithKeep = mgr3.LeaveRoom("h3", keepRoom: true);
@@ -443,25 +443,20 @@ public static class RoomTests
 
     // ==================== 辅助 ====================
 
-    /// <summary>构造一个可独立测试的注册表（依赖用最简对象，不产生后台线程）。</summary>
+    /// <summary>
+    /// 构造一个可独立测试的注册表（依赖用最简对象，不产生后台线程）。
+    /// 房间人数上限来自该游戏模块的元数据，因此这里注册一个「4 人上限」的狼人杀测试模块。
+    /// </summary>
     private static RoomManager NewManager(int maxRooms = 100, int graceSeconds = 60)
     {
         var channel = new EncryptedChannel(null!, new CryptoSessionStore());
-        var rules = new GameRules
-        {
-            MinPlayers = 4,
-            MaxPlayers = 4,
-            NightActionSeconds = 1,
-            DiscussionSeconds = 1,
-            VoteSeconds = 1,
-            HunterShotSeconds = 1
-        };
+        var (catalog, _) = TestGames.WerewolfOnly(minPlayers: 4, maxPlayers: 4);
         var options = new RoomOptions
         {
             MaxRooms = maxRooms,
             EmptyGraceSeconds = graceSeconds,
             RecycleScanSeconds = 1
         };
-        return new RoomManager(channel, rules, options);
+        return new RoomManager(channel, catalog, options);
     }
 }

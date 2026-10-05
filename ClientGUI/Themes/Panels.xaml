@@ -11,6 +11,7 @@
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Converters.xaml" />
         <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Controls.xaml" />
+        <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/GamePanels.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -65,11 +66,11 @@
                                Visibility="{Binding HasTags, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
 
-                <!-- 身份 + 选中标记 -->
+                <!-- 游戏自定义标签（狼人杀 = 身份名）+ 选中标记 -->
                 <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
-                    <TextBlock Text="{Binding RoleText}" FontSize="11.5" HorizontalAlignment="Right"
-                               Foreground="{Binding RoleBrush}"
-                               Visibility="{Binding HasRole, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <TextBlock Text="{Binding TagText}" FontSize="11.5" HorizontalAlignment="Right"
+                               Foreground="{Binding TagBrush}"
+                               Visibility="{Binding HasTag, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <TextBlock Text="✔ 已选" FontSize="10.5" Foreground="{DynamicResource AccentSoftBrush}" HorizontalAlignment="Right"
                                Margin="0,2,0,0"
                                Visibility="{Binding IsTarget, Converter={StaticResource BooleanToVisibilityConverter}}" />

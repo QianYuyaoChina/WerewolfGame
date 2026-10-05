@@ -1,0 +1,349 @@
+%% =====================================================================
+%% 多游戏可插拔架构 · 类图（class-diagram）
+%% 配套文档：ARCHITECTURE.md
+%% 说明：
+%%  - 共享库（Werewolf.Client.Share）三端复用：DTO / 元数据 / 协议 / 网络封装。
+%%  - 服务端契约（Werewolf.Server.Games）由平台定义、游戏模块实现。
+%%  - 依赖方向：平台 --> 契约(接口)；游戏模块 --> 平台原语(IGameContext)；平台永不依赖具体游戏。
+%% =====================================================================
+classDiagram
+    direction LR
+
+    %% ---------- 共享库：元数据与协议 ----------
+    class GameIds {
+        <<static>>
+        +string Werewolf
+        +string Undercover
+        +string TurtleSoup
+        +string Default
+    }
+    class GameInfo {
+        +string GameId
+        +string DisplayName
+        +string Emoji
+        +string Tagline
+        +int MinPlayers
+        +int MaxPlayers
+        +string RulesText
+        +string Label
+    }
+    class GameStateDto {
+        +string GameId
+        +string RoomId
+        +string RoomName
+        +string HostName
+        +bool Running
+        +string Status
+        +int YourId
+        +bool IsAlive
+        +List~PlayerDto~ Players
+        +JsonNode GamePayload
+    }
+    class PlayerDto {
+        +int Id
+        +string Name
+        +bool IsAlive
+        +bool IsHost
+        +bool IsYou
+        +bool IsConnected
+        +string Tag
+        +string TagColor
+    }
+    class RoomInfoDto {
+        +string Id
+        +string Name
+        +string GameId
+        +string GameName
+        +string GameEmoji
+        +int PlayerCount
+        +int MaxPlayers
+        +string Status
+        +bool HasPassword
+        +string Host
+    }
+    class CreateRoomPayload {
+        +string Name
+        +string Password
+        +string GameId
+    }
+    class GameListResult {
+        +bool Ok
+        +string Msg
+        +List~GameInfo~ Games
+    }
+    class WerewolfGameState {
+        +string Phase
+        +int Day
+        +string YourRole
+        +string YourRoleDesc
+        +string ActingRole
+        +GameRules Rules
+    }
+    class GameClient {
+        +LoginAsync()
+        +ListRoomsAsync()
+        +ListGamesAsync()
+        +CreateRoomAsync(name, password, gameId)
+        +JoinRoomAsync()
+        +LeaveRoomAsync()
+        +StartGameAsync()
+        +CallGameOpAsync(op, payload)
+        +RefreshStateAsync()
+        +LastState
+    }
+
+    GameStateDto o-- PlayerDto : Players[]
+    GameListResult o-- GameInfo : Games[]
+    GameStateDto ..> GameInfo : GameId 引用元数据
+    GameStateDto ..> WerewolfGameState : GamePayload 解析为
+
+    %% ---------- 服务端契约（平台定义）----------
+    class IGameModule {
+        <<interface>>
+        +GameInfo Info
+        +IGameInstance CreateInstance(IGameContext ctx)
+    }
+    class IGameInstance {
+        <<interface>>
+        +string GameId
+        +GameStatus Status
+        +Start() (bool, string)
+        +RunAsync() Task
+        +HandleAction(op, payload, connId) (bool, string)
+        +BuildPayload(viewerConnId) JsonNode
+        +DecoratePlayers(rows, viewer)
+        +Reset()
+        +OnPlayerJoined(player)
+        +OnPlayerLeft(player, stillInGame)
+        +OnPlayerReconnected(player)
+    }
+    class IGameContext {
+        <<interface>>
+        +string RoomId
+        +string RoomName
+        +IReadOnlyList~RoomPlayer~ Players
+        +IReadOnlyList~RoomPlayer~ OnlinePlayers
+        +FindByConnection(connId) RoomPlayer
+        +FindByName(username) RoomPlayer
+        +IGameConfig Config
+        +BroadcastAsync(text) Task
+        +PrivateAsync(connId, text) Task
+        +BroadcastStateAsync() Task
+    }
+    class IGameConfig {
+        <<interface>>
+        +GetSection~T~(name) T
+    }
+    class GameStatus {
+        <<enumeration>>
+        Waiting
+        Running
+        GameOver
+    }
+    class PlayerTag {
+        <<struct>>
+        +string Text
+        +string ColorHex
+    }
+    class IGameCatalog {
+        <<interface>>
+        +IReadOnlyList~GameInfo~ Available
+        +Contains(gameId) bool
+        +Describe(gameId) GameInfo
+        +TryGetFactory(gameId, out factory) bool
+        +ResolveOrDefault(gameId) string
+    }
+    class GameCatalog {
+        -ConcurrentDictionary~string,IGameModule~ _modules
+        +Register(module)
+        +RegisterAll(modules)
+    }
+    class GameDiscovery {
+        <<static>>
+        +Discover(assemblies) IEnumerable~IGameModule~
+    }
+    class GameConfig {
+        +GetSection~T~(name) T
+    }
+
+    IGameModule --> IGameInstance : create
+    IGameModule --> GameInfo : Info
+    IGameInstance --> GameStatus : Status
+    IGameInstance --> PlayerTag : 可选标签
+    GameCatalog ..|> IGameCatalog
+    GameCatalog o-- IGameModule : 注册表
+    GameDiscovery ..> IGameModule : 反射发现
+    GameCatalog ..> GameDiscovery : 启动期调用
+    IGameInstance --> IGameContext : 依赖平台原语
+    GameConfig ..|> IGameConfig
+    IGameContext o-- IGameConfig : Config
+
+    %% ---------- 服务端平台层 ----------
+    class GameHub {
+        -RoomManager _rooms
+        -IGameCatalog _catalog
+        +Handshake(json) string
+        +Confirm(proof) bool
+        +Call(envelope) string
+        -DispatchAsync(req) RpcReply
+    }
+    class RoomManager {
+        -ConcurrentDictionary~string,GameRoom~ _rooms
+        -IGameCatalog _catalog
+        +CreateRoom(connId, name, pwd, gameId)
+        +JoinRoom(roomId, connId, pwd)
+        +LeaveRoom(connId, keepRoom)
+        +List() List~RoomInfoDto~
+        +RecycleExpired() int
+    }
+    class GameRoom {
+        +string Id
+        +string Name
+        +string GameId
+        +bool IsRunning
+        +bool Persistent
+        +HostUsername
+        +PlayerCount
+        +AddOrReconnect(user, conn)
+        +OnDisconnected(conn) string
+        +StartGame(conn) (bool, string)
+        +HandleGameAction(op, payload, conn) (bool, string)
+        +SnapshotFor(conn) GameStateDto
+        +ToInfo() RoomInfoDto
+    }
+    class RoomPlayer {
+        +string Username
+        +string ConnectionId
+        +bool IsConnected
+        +bool IsHost
+        +bool IsAlive
+    }
+    class EncryptedChannel {
+        +SendMessageAsync(conn, text)
+        +SendStateAsync(conn, state)
+    }
+    class RoomRecycleService {
+        +ExecuteAsync(token)
+    }
+
+    GameHub --> RoomManager
+    GameHub --> IGameCatalog
+    RoomManager o-- GameRoom : 管理
+    RoomManager --> IGameCatalog : 取游戏工厂/元数据
+    GameRoom ..|> IGameContext : 实现（对游戏暴露）
+    GameRoom o-- IGameInstance : 组合（每房一个）
+    GameRoom o-- RoomPlayer : 玩家名单
+    GameRoom --> EncryptedChannel : 推送
+    GameRoom ..> GameInfo : ToInfo 取元数据
+    RoomRecycleService --> RoomManager : 周期回收
+
+    %% ---------- 游戏模块实现（可插拔）----------
+    class WerewolfGameModule {
+        +GameInfo Info
+        +CreateInstance(ctx) IGameInstance
+    }
+    class WerewolfGameInstance {
+        -object _sync
+        -Random _rng
+        -WerewolfPlayer[] _states
+        -Phase _phase
+        -int _day
+        +Start()
+        +RunAsync()
+        +HandleAction(op, payload, conn)
+        +BuildPayload(conn)
+        +DecoratePlayers(rows, viewer)
+    }
+    class WerewolfPlayer {
+        +Role Role
+        +bool HasAntidote
+        +bool HasPoison
+        +int NightTarget
+        +int VoteTarget
+        +bool HunterCanShoot
+    }
+    class FakeGameModule {
+        <<test-only>>
+        +GameInfo Info
+        +CreateInstance(ctx)
+    }
+
+    WerewolfGameModule ..|> IGameModule
+    WerewolfGameInstance ..|> IGameInstance
+    WerewolfGameInstance o-- WerewolfPlayer : 玩家技能数据
+    WerewolfGameInstance ..> WerewolfGameState : BuildPayload 产出
+    FakeGameModule ..|> IGameModule : 扩展性验证
+
+    %% ---------- GUI ----------
+    class GameViewModel {
+        -GameClient _client
+        -GameViewModelFactory _factory
+        +IGameViewModel Game
+        +ObservableCollection~PlayerRow~ Players
+        +string RoomHeaderText
+        +RefreshStateAsync()
+        +OnStateReceived(state)
+    }
+    class IGameViewModel {
+        <<interface>>
+        +string GameId
+        +IReadOnlyList~GameAction~ Actions
+        +IReadOnlyList~StatusChip~ Chips
+        +string Hint
+        +CanSelectPlayer(row) bool
+        +OnPlayerSelected(row)
+        +OnState(state)
+        +Refresh()
+        +Reset()
+    }
+    class IGameHostBridge {
+        <<interface>>
+        +GameClient Client
+        +int SelectedTargetId
+        +int PlayerCount
+        +bool IsHost
+        +bool CanStartGame
+    }
+    class GameViewModelFactory {
+        <<static>>
+        +Create(gameId, client, bridge) IGameViewModel
+    }
+    class WerewolfViewModel {
+        +Actions
+        +Chips
+        +Hint
+        +OnState(state)
+    }
+    class UnknownGameViewModel {
+        +GameId
+        +Hint
+    }
+    class RoomListViewModel {
+        +ObservableCollection~RoomRow~ Rooms
+        +CreateAndJoinAsync(name, pwd, gameId)
+    }
+
+    GameViewModel o-- IGameViewModel : Game 插槽
+    GameViewModel ..|> IGameHostBridge : 实现
+    GameViewModel --> GameViewModelFactory : 按 GameId 创建
+    GameViewModelFactory ..> WerewolfViewModel : werewolf
+    GameViewModelFactory ..> UnknownGameViewModel : 未知兜底
+    IGameViewModel <|.. WerewolfViewModel
+    IGameViewModel <|.. UnknownGameViewModel
+    GameViewModel --> GameClient
+    RoomListViewModel --> GameClient : 列表/创建/加入
+
+    %% ---------- 控制台 ----------
+    class IConsoleGameModule {
+        <<interface>>
+        +string GameId
+        +string HelpText
+        +RoomHeader(state) string
+        +RenderState(state) string
+        +TryHandleAsync(line, state, client) Task~bool~
+    }
+    class WerewolfConsoleModule {
+        +GameId
+        +TryHandleAsync(...)
+    }
+    IConsoleGameModule <|.. WerewolfConsoleModule

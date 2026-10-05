@@ -1,7 +1,7 @@
 namespace Werewolf.Server;
 
-/// <summary>狼人杀阵营角色。</summary>
-public enum Role { Villager, Werewolf, Seer, Witch, Hunter, Guard }
+/// <summary>狼人杀阵营角色。警长在本实现中作为一种独立身份（只影响投票权重与警徽移交）。</summary>
+public enum Role { Villager, Werewolf, Seer, Witch, Hunter, Guard, Cupid, Sheriff }
 
 /// <summary>
 /// 狼人杀角色元数据（名称 / 说明 / 夜晚顺序解析 / 玩家标签颜色）。
@@ -9,11 +9,14 @@ public enum Role { Villager, Werewolf, Seer, Witch, Hunter, Guard }
 /// </summary>
 public static class RoleInfo
 {
-    /// <summary>夜晚会“轮到行动”的标准角色，按默认行动顺序排列（守卫 → 狼人 → 女巫 → 预言家）。</summary>
+    /// <summary>夜晚会“轮到行动”的标准角色，按默认行动顺序排列（丘比特 → 守卫 → 狼人 → 女巫 → 预言家）。</summary>
     public static readonly IReadOnlyList<Role> NightRoles = new[]
     {
-        Role.Guard, Role.Werewolf, Role.Witch, Role.Seer
+        Role.Cupid, Role.Guard, Role.Werewolf, Role.Witch, Role.Seer
     };
+
+    /// <summary>只有第一夜行动的角色（丘比特）。</summary>
+    public static bool IsFirstNightOnly(Role r) => r == Role.Cupid;
 
     public static string Name(Role r) => r switch
     {
@@ -23,6 +26,8 @@ public static class RoleInfo
         Role.Witch => "女巫",
         Role.Hunter => "猎人",
         Role.Guard => "守卫",
+        Role.Cupid => "丘比特",
+        Role.Sheriff => "警长",
         _ => "未知"
     };
 
@@ -34,6 +39,8 @@ public static class RoleInfo
         Role.Witch => "拥有解药与毒药各一瓶，各只能使用一次。",
         Role.Hunter => "被狼人击杀或被投票放逐时，可开枪带走一名玩家（被毒死不能开枪）。",
         Role.Guard => "每晚守护一名玩家免受狼人击杀，不能连续两晚守护同一人。",
+        Role.Cupid => "第一夜指定两名玩家成为情侣；一方出局，另一方立刻殉情。",
+        Role.Sheriff => "投票时算 1.5 票；被淘汰时可把警徽移交给一名存活玩家。",
         _ => ""
     };
 
@@ -48,6 +55,8 @@ public static class RoleInfo
         Role.Witch => "#00FA9A",      // MediumSpringGreen
         Role.Hunter => "#F4A460",     // SandyBrown
         Role.Guard => "#87CEFA",      // LightSkyBlue
+        Role.Cupid => "#FF7FB0",      // 粉（新）
+        Role.Sheriff => "#FFD75E",    // 金（新）
         Role.Villager => "#DCDCDC",   // Gainsboro
         _ => null
     };

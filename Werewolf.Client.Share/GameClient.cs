@@ -27,6 +27,19 @@ public readonly record struct LoginResult(bool Ok, string Message, bool Reconnec
 /// <param name="Reconnected">是否为恢复已有房间身份。</param>
 public readonly record struct RoomResult(bool Ok, string Message, string RoomId, bool Reconnected);
 
+/// <summary>房主设置的拉取结果（<c>hostsettings</c> / <c>resetinvite</c>）。</summary>
+public readonly record struct HostSettingsResult(bool Ok, string Message, HostSettingsDto? Settings)
+{
+    /// <summary>成功时的便捷构造。</summary>
+    public static HostSettingsResult Success(HostSettingsDto settings) => new(true, "", settings);
+
+    /// <summary>失败时的便捷构造。</summary>
+    public static HostSettingsResult Fail(string message) => new(false, message, null);
+
+    /// <summary>成功时返回设置，失败时返回 null（便于 <c>result.Settings?.Xxx</c> 写法）。</summary>
+    public HostSettingsResult(bool ok, string message) : this(ok, message, null) { }
+}
+
 /// <summary>
 /// 对 SignalR <see cref="HubConnection"/> 的封装，承载**整个网络收发逻辑**：
 /// <list type="number">
@@ -71,6 +84,12 @@ public sealed class GameClient : IAsyncDisposable
 
     /// <summary>当前房间密码（内存态，仅用于重连恢复）；离开房间时清空。</summary>
     private string? _roomPassword;
+
+    /// <summary>
+    /// 进房时用的邀请令牌（凭邀请码进房时记录）。断线重连优先用它——
+    /// 因为房主可能已经改过密码，此时内存里的密码已经失效，而令牌仍然有效。
+    /// </summary>
+    private string? _inviteToken;
 
     private string _roomName = "";
     private string _hostName = "";
@@ -188,7 +207,7 @@ public sealed class GameClient : IAsyncDisposable
                     return;
                 }
 
-                var rr = await JoinRoomAsync(_roomId, _roomPassword); // ③ 恢复房间（内存中的房间号+密码）
+                var rr = await JoinRoomAsync(_roomId, _roomPassword, _inviteToken); // ③ 恢复房间（内存中的房间号 + 密码/令牌）
                 if (rr.Ok)
                 {
                     _joined = true;
@@ -325,18 +344,69 @@ public sealed class GameClient : IAsyncDisposable
         return result;
     }
 
-    /// <summary>按房间号加入；加密房间需正确密码。</summary>
-    public async Task<RoomResult> JoinRoomAsync(string roomId, string? password)
+    /// <summary>
+    /// 按房间号加入：加密房间需正确密码；若携带**有效邀请令牌**则跳过密码校验
+    /// （令牌来自邀请码，房主改密码后依然有效）。
+    /// </summary>
+    public async Task<RoomResult> JoinRoomAsync(string roomId, string? password, string? inviteToken = null)
     {
         var reply = await CallAsync(Ops.JoinRoom, Node(new JoinRoomPayload
         {
             RoomId = roomId ?? "",
-            Password = password
+            Password = password,
+            InviteToken = inviteToken
         }));
 
         var result = ApplyRoomReply(reply);
-        if (result.Ok) _roomPassword = password;
+        if (result.Ok)
+        {
+            _roomPassword = password;
+            _inviteToken = inviteToken;   // 记住令牌，断线重连时继续用它（因为此时可能已不知道新密码）
+        }
         return result;
+    }
+
+    // ---------------- 房主设置 ----------------
+
+    /// <summary>拉取房主视角的房间设置（含邀请令牌）。仅房主可调用。</summary>
+    public async Task<HostSettingsResult> GetHostSettingsAsync()
+    {
+        var reply = await CallAsync(Ops.HostSettings);
+        if (!reply.Ok) return HostSettingsResult.Fail(reply.Msg);
+
+        var dto = reply.Payload?.Deserialize<HostSettingsDto>(JsonOptions);
+        return dto == null ? HostSettingsResult.Fail("无法解析房间设置。") : HostSettingsResult.Success(dto);
+    }
+
+    /// <summary>
+    /// 修改房间设置（最大人数 / 密码 / 游戏私有配置）；null 字段表示不改，
+    /// <paramref name="gameSettingsJson"/> 传空字符串表示恢复游戏的默认配置。
+    /// </summary>
+    public async Task<RoomResult> UpdateRoomSettingsAsync(int? maxPlayers, string? newPassword,
+                                                        bool clearPassword, string? gameSettingsJson = null)
+    {
+        var reply = await CallAsync(Ops.RoomSettings, Node(new UpdateRoomSettingsPayload
+        {
+            MaxPlayers = maxPlayers,
+            NewPassword = newPassword,
+            ClearPassword = clearPassword,
+            GameSettingsJson = gameSettingsJson
+        }));
+
+        var result = ApplyRoomReply(reply);
+        if (result.Ok && (clearPassword || !string.IsNullOrEmpty(newPassword)))
+            _roomPassword = clearPassword ? null : newPassword;   // 同步本地记忆，便于重连
+        return result;
+    }
+
+    /// <summary>作废并重新生成邀请令牌（旧的邀请码立即失效）。仅房主可调用。</summary>
+    public async Task<HostSettingsResult> ResetInviteAsync()
+    {
+        var reply = await CallAsync(Ops.ResetInvite);
+        if (!reply.Ok) return HostSettingsResult.Fail(reply.Msg);
+
+        var dto = reply.Payload?.Deserialize<HostSettingsDto>(JsonOptions);
+        return dto == null ? HostSettingsResult.Fail("无法解析房间设置。") : HostSettingsResult.Success(dto);
     }
 
     /// <summary>离开当前房间（不拆连接）；成功后清空内存中的房间号与密码。</summary>
@@ -353,6 +423,7 @@ public sealed class GameClient : IAsyncDisposable
             _joined = false;
             _roomId = "";
             _roomPassword = null;
+            _inviteToken = null;
             _roomName = "";
             _hostName = "";
             LastState = null;
@@ -362,18 +433,23 @@ public sealed class GameClient : IAsyncDisposable
 
     // ---------------- 邀请码 ----------------
 
-    /// <summary>生成当前房间的邀请码（含服务器地址与房间密码）；不在房间时返回 null。</summary>
-    public string? CreateInviteCode()
-        => string.IsNullOrEmpty(_roomId)
+    /// <summary>
+    /// 生成当前房间的邀请码。
+    /// <paramref name="inviteToken"/> 由房主经 <see cref="GetHostSettingsAsync"/> 取得；
+    /// 邀请码里放的是**令牌而不是密码**，因此房主之后修改房间密码，这个码依然有效。
+    /// 不在房间或没有令牌时返回 null。
+    /// </summary>
+    public string? CreateInviteCode(string? inviteToken)
+        => string.IsNullOrEmpty(_roomId) || string.IsNullOrEmpty(inviteToken)
             ? null
-            : InviteCode.Create(Endpoint, _roomId, _roomPassword, _roomName);
+            : InviteCode.Create(Endpoint, _roomId, inviteToken, _roomName);
 
     /// <summary>解析邀请码（静态便捷入口，供界面在未连接时预览）。</summary>
     public static bool TryParseInvite(string? code, out InvitePayload? invite, out string error)
         => InviteCode.TryParse(code, out invite, out error);
 
     /// <summary>
-    /// 用邀请码快速进房。码里已包含服务器地址、房间号与房间密码：
+    /// 用邀请码快速进房。码里已包含服务器地址、房间号与邀请令牌：
     /// 若当前不在该服务器上，会先切换到码中的地址并用内存中的账号重新登录，再进房。
     /// 注意：邀请码不含账号，调用方必须先完成登录（或本客户端此前已登录过）。
     /// </summary>
@@ -398,7 +474,8 @@ public sealed class GameClient : IAsyncDisposable
             }
         }
 
-        return await JoinRoomAsync(invite.RoomId, invite.Password);
+        // 凭令牌进房：即使房主后来改过密码，这个码依然可用。
+        return await JoinRoomAsync(invite.RoomId, null, invite.InviteToken);
     }
 
     /// <summary>比较两个服务器地址是否指向同一端点（忽略大小写与结尾斜杠）。</summary>

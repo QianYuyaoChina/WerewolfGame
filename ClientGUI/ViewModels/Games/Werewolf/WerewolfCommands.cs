@@ -25,4 +25,19 @@ public sealed class WerewolfCommands
 
     /// <summary>猎人放弃开枪（-1）。</summary>
     public required ICommand SkipHunterShot { get; init; }
+
+    /// <summary>丘比特：把当前选中的玩家记为情侣①。</summary>
+    public required ICommand SetCupidA { get; init; }
+
+    /// <summary>丘比特：把当前选中的玩家记为情侣②。</summary>
+    public required ICommand SetCupidB { get; init; }
+
+    /// <summary>丘比特：确认两人成为情侣并提交。</summary>
+    public required ICommand ConfirmCupid { get; init; }
+
+    /// <summary>警长：把警徽移交给当前选中的玩家。</summary>
+    public required ICommand TransferBadge { get; init; }
+
+    /// <summary>警长：放弃移交，警徽作废。</summary>
+    public required ICommand VoidBadge { get; init; }
 }

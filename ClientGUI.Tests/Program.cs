@@ -87,6 +87,20 @@ if (reconnectIndex >= 0)
     return await ReconnectProbe.RunAsync(url, seconds);
 }
 
+// 新身份（丘比特 / 警长 / 自定义布局）：--newroles <url>（需小局配置）
+var newRolesIndex = Array.IndexOf(args, "--newroles");
+if (newRolesIndex >= 0)
+{
+    var url = newRolesIndex + 1 < args.Length ? args[newRolesIndex + 1] : DefaultUrl;
+    Console.WriteLine($"════════ 新身份端到端（{url}） ════════");
+    var newRoles = await NewRolesProbe.RunAsync(url);
+    Console.WriteLine();
+    foreach (var note in newRoles.Notes) Console.WriteLine("   " + note);
+    Console.WriteLine();
+    Console.WriteLine(newRoles.Ok ? "✅ 通过" : "❌ 存在问题");
+    return newRoles.Ok ? 0 : 1;
+}
+
 // 房主交接 / 房间保留 / 邀请码：--hostinvite <url>
 var hostInviteIndex = Array.IndexOf(args, "--hostinvite");
 if (hostInviteIndex >= 0)
@@ -124,6 +138,9 @@ CryptoTests.RunAll();
 
 Console.WriteLine("════════ 规则与界面状态校验 ════════");
 GameRulesTests.RunAll();
+
+Console.WriteLine("════════ 新身份与房主设置校验 ════════");
+NewRolesTests.RunAll();
 
 Console.WriteLine("════════ 多房间纯逻辑校验 ════════");
 RoomTests.RunAll();

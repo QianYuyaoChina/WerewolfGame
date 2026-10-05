@@ -5,7 +5,7 @@ using Werewolf.Client.Share.Crypto;
 
 namespace Werewolf.Client.Share;
 
-/// <summary>邀请码携带的信息：连哪台服务器、进哪个房间、房间密码（如有）。</summary>
+/// <summary>邀请码携带的信息：连哪台服务器、进哪个房间、房间的邀请令牌。</summary>
 public sealed class InvitePayload
 {
     /// <summary>服务器地址（完整 Hub 地址，如 <c>http://192.168.1.8:5000/gamehub</c>）。</summary>
@@ -14,19 +14,25 @@ public sealed class InvitePayload
     /// <summary>房间号（5 位）。</summary>
     public string RoomId { get; set; } = "";
 
-    /// <summary>房间密码；公开房间为 null。</summary>
-    public string? Password { get; set; }
+    /// <summary>
+    /// 房间邀请令牌。**不是房间密码**：令牌在房间生命周期内稳定，房主改密码后旧邀请码依然有效；
+    /// 只有房主主动「重置邀请码」才会让旧码失效。
+    /// </summary>
+    public string? InviteToken { get; set; }
 
     /// <summary>房间名（仅用于提示展示）。</summary>
     public string? RoomName { get; set; }
 
-    /// <summary>是否携带房间密码。</summary>
-    public bool HasPassword => !string.IsNullOrEmpty(Password);
+    /// <summary>是否携带邀请令牌（总是携带；保留该属性便于界面提示）。</summary>
+    public bool HasToken => !string.IsNullOrEmpty(InviteToken);
 }
 
 /// <summary>
-/// 邀请码：把「服务器地址 + 房间号 + 房间密码」打包后**对称加密**成一段可复制的字符串，
-/// 接收方客户端解析后自动带上密码进房，无需手动输入密码。
+/// 邀请码：把「服务器地址 + 房间号 + 邀请令牌」打包后**对称加密**成一段可复制的字符串，
+/// 接收方客户端解析后自动凭令牌进房，无需手动输入房间密码。
+///
+/// 为什么放令牌而不是密码：房主随时可能修改房间密码，若把密码写进邀请码，
+/// 一改密码所有已发出的邀请码就全废了。令牌与密码解耦，且可由房主显式重置。
 ///
 /// 加密密钥由预共享密钥（<see cref="PreSharedKey"/>）派生，因此：
 /// <list type="bullet">
@@ -44,13 +50,13 @@ public static class InviteCode
     private static readonly byte[] Info = Encoding.UTF8.GetBytes("werewolf-invite-v1");
 
     /// <summary>生成邀请码。</summary>
-    public static string Create(string url, string roomId, string? password, string? roomName)
+    public static string Create(string url, string roomId, string? inviteToken, string? roomName)
     {
         var payload = new InvitePayload
         {
             Url = (url ?? "").Trim(),
             RoomId = (roomId ?? "").Trim(),
-            Password = string.IsNullOrEmpty(password) ? null : password,
+            InviteToken = string.IsNullOrEmpty(inviteToken) ? null : inviteToken,
             RoomName = string.IsNullOrEmpty(roomName) ? null : roomName
         };
 

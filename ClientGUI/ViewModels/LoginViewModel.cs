@@ -121,7 +121,7 @@ public sealed class LoginViewModel : ObservableObject
         ShowError = false;
 
         var name = string.IsNullOrWhiteSpace(invite.RoomName) ? "" : $"（{invite.RoomName}）";
-        var lockText = invite.HasPassword ? "，房间密码已包含在邀请码中" : "";
+        var lockText = invite.HasToken ? "，房间密码已包含在邀请码中" : "";
         InviteHint = $"✅ 邀请码有效：登录后将进入房间 {invite.RoomId}{name}{lockText}。";
     }
 

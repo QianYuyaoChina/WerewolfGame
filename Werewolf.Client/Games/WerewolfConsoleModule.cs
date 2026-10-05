@@ -19,11 +19,12 @@ internal sealed class WerewolfConsoleModule : IConsoleGameModule
 
     public string HelpText => @"
 ──────────── 狼人杀指令 ────────────
-  数字 (如 3)        夜间选择目标 / 投票 / 猎人开枪
-  -1                 弃票 / 放弃开枪
+  数字 (如 3)        夜间选择目标 / 投票 / 猎人开枪 / 移交警徽
+  -1                 弃票 / 放弃开枪 / 作废警徽
   heal               女巫使用解药
   poison 3           女巫毒杀 3 号
-  none               女巫今晚不用药";
+  none               女巫今晚不用药
+  cupid 3 5          丘比特指定 3 号与 5 号成为情侣";
 
     public string RoomHeader(GameStateDto s)
     {
@@ -41,6 +42,12 @@ internal sealed class WerewolfConsoleModule : IConsoleGameModule
         var role = string.IsNullOrEmpty(wf?.YourRole) ? "未知" : wf!.YourRole;
 
         sb.AppendLine($"│ 你：[{s.YourId}] {me?.Name}　身份：{role}　{(s.IsAlive ? "存活" : "已出局")}");
+        if (!string.IsNullOrEmpty(wf?.RoleSummary))
+            sb.AppendLine($"│ 本局配置：{wf!.RoleSummary}");
+        if (wf is { IsLover: true } && !string.IsNullOrEmpty(wf.LoverName))
+            sb.AppendLine($"│ 💘 你的情侣：{wf.LoverName}（一方出局另一方殉情）");
+        if (wf is { SheriffEnabled: true })
+            sb.AppendLine(string.IsNullOrEmpty(wf.SheriffName) ? "│ 🎖 警徽已作废" : $"│ 🎖 当前警长：{wf.SheriffName}");
         if (!string.IsNullOrEmpty(s.RoomName) || !string.IsNullOrEmpty(s.HostName))
             sb.AppendLine($"│ 房间：{s.RoomName}　房主：{s.HostName}");
         sb.AppendLine("│ 玩家列表：");
@@ -85,6 +92,22 @@ internal sealed class WerewolfConsoleModule : IConsoleGameModule
             }
         }
 
+        // 丘比特专属指令：cupid 3 5
+        if (line.StartsWith("cupid ", StringComparison.OrdinalIgnoreCase)
+            && wf.Phase == Phases.Night && wf.YourRole == Roles.Cupid)
+        {
+            var parts = line[6..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 2 && int.TryParse(parts[0], out int a) && int.TryParse(parts[1], out int b))
+            {
+                if (a == b) { Print("⚠️ 情侣必须是两名不同的玩家。"); return true; }
+                await client.CallGameOpAsync(WerewolfOps.Cupid, Node(new CupidPayload { TargetA = a, TargetB = b }));
+                Print($"💘 已让 [{a}] 与 [{b}] 成为情侣");
+                return true;
+            }
+            Print("⚠️ 用法：cupid 编号1 编号2（例如 cupid 3 5）");
+            return true;
+        }
+
         // 纯数字 → 阶段化指令
         if (int.TryParse(line, out int id))
         {
@@ -101,6 +124,10 @@ internal sealed class WerewolfConsoleModule : IConsoleGameModule
                 case Phases.HunterShoot:
                     await client.CallGameOpAsync(WerewolfOps.Hunter, Node(new TargetPayload { TargetId = id }));
                     Print(id < 0 ? "✅ 放弃开枪" : $"✅ 开枪 → [{id}]");
+                    return true;
+                case Phases.SheriffTransfer:
+                    await client.CallGameOpAsync(WerewolfOps.Sheriff, Node(new TargetPayload { TargetId = id }));
+                    Print(id < 0 ? "✅ 已作废警徽" : $"🎖 已把警徽移交给 [{id}]");
                     return true;
                 default:
                     Print("⚠️ 当前阶段不能选择目标。");

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Nodes;
 using Werewolf.Client.Share;
 using Werewolf.Server.Games;
@@ -5,7 +7,7 @@ using Werewolf.Server.Games;
 namespace Werewolf.Server;
 
 /// <summary>
-/// 房间宿主（平台层）。只负责：房间身份 / 玩家名单 / 密码 / 在线占用 / 回收，
+/// 房间宿主（平台层）。只负责：房间身份 / 玩家名单 / 密码 / 在线占用 / 回收 / 房主设置，
 /// 以及对外（网络层）暴露「进房 / 离开 / 拉状态 / 开局」。**玩法**全部委托给可插拔的
 /// <see cref="IGameInstance"/>；对游戏侧则以 <see cref="IGameContext"/> 暴露平台原语。
 /// 本类不引用任何具体游戏类型。
@@ -19,13 +21,28 @@ public class GameRoom : IGameContext
     private readonly object _sync = new();
 
     /// <summary>房间密码的存储值（<see cref="RoomPassword.Hash"/> 的结果）；无密码为 null。绝不出房间对象。</summary>
-    private readonly string? _passwordHash;
+    private string? _passwordHash;
 
     /// <summary>绑定本房间的玩法实例（唯一进入游戏玩法的入口）。</summary>
     private readonly IGameInstance _game;
 
     /// <summary>只读配置门面（游戏经 <see cref="Config"/> 自取规则）。</summary>
     private readonly IGameConfig _config;
+
+    /// <summary>
+    /// 房主为本房间设置的「游戏私有配置」（对平台是**不透明字符串**，由游戏自己解释）。
+    /// 狼人杀用它承载自定义身份布局；null 表示使用游戏的默认配置。
+    /// </summary>
+    private string? _gameSettingsJson;
+
+    /// <summary>房主覆盖的最大人数；0 表示沿用游戏元数据里的上限。</summary>
+    private int _maxPlayersOverride;
+
+    /// <summary>
+    /// 房间邀请令牌：**房间生命周期内稳定**，房主改密码 / 改人数都不会变，
+    /// 因此已发出的邀请码不会因为改密码而失效；只有房主主动重置才会换新。
+    /// </summary>
+    private string _inviteToken;
 
     /// <summary>无在线玩家起始时间（UTC）；有在线玩家为 null，用于宽限期回收判定。</summary>
     private DateTime? _emptySince;
@@ -46,17 +63,8 @@ public class GameRoom : IGameContext
         GameId = string.IsNullOrWhiteSpace(gameId) ? GameIds.Default : gameId;
         _channel = channel;
         _config = config ?? new GameConfig(null);
-
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            HasPassword = false;
-            _passwordHash = null;
-        }
-        else
-        {
-            HasPassword = true;
-            _passwordHash = RoomPassword.Hash(Id, password);
-        }
+        _inviteToken = NewInviteToken();
+        _passwordHash = string.IsNullOrWhiteSpace(password) ? null : RoomPassword.Hash(Id, password);
 
         CreatedAt = DateTime.UtcNow;
 
@@ -64,7 +72,7 @@ public class GameRoom : IGameContext
         _game = gameFactory(this);
     }
 
-    // ==================== 房间身份信息（只读快照） ====================
+    // ==================== 房间身份信息 ====================
 
     /// <summary>5 位房间号，唯一标识。</summary>
     public string Id { get; }
@@ -75,11 +83,36 @@ public class GameRoom : IGameContext
     /// <summary>房间绑定的游戏机器名（<see cref="GameIds"/>）；房间生命周期内不可变。</summary>
     public string GameId { get; }
 
-    /// <summary>是否设置了密码。</summary>
-    public bool HasPassword { get; }
+    /// <summary>是否设置了密码（房主可随时改）。</summary>
+    public bool HasPassword { get { lock (_sync) return _passwordHash != null; } }
 
     /// <summary>创建时间（UTC），列表按此排序。</summary>
     public DateTime CreatedAt { get; }
+
+    /// <summary>游戏元数据允许的最小人数。</summary>
+    public int MinPlayers => _game.Info.MinPlayers;
+
+    /// <summary>游戏元数据允许的最大人数（房主可在此基础上调小）。</summary>
+    public int MaxPlayersLimit => _game.Info.MaxPlayers;
+
+    /// <summary>房间**实际**的最大人数：房主设过就用房主的值，否则用游戏上限。</summary>
+    public int MaxPlayers
+    {
+        get
+        {
+            lock (_sync)
+            {
+                var limit = _game.Info.MaxPlayers;
+                return _maxPlayersOverride > 0 ? Math.Min(_maxPlayersOverride, limit) : limit;
+            }
+        }
+    }
+
+    /// <summary>邀请令牌（仅经「房主设置」下发给房主，不随房间列表暴露）。</summary>
+    public string InviteToken { get { lock (_sync) return _inviteToken; } }
+
+    /// <summary>房主自定义的游戏私有配置（不透明字符串）；null 表示使用默认。</summary>
+    public string? GameSettingsJson { get { lock (_sync) return _gameSettingsJson; } }
 
     /// <summary>房主用户名（取房间内 IsHost 的玩家；无则 ""）。</summary>
     public string HostUsername
@@ -126,9 +159,121 @@ public class GameRoom : IGameContext
         }
     }
 
+    // ==================== 密码 / 邀请令牌 ====================
+
     /// <summary>校验密码：公开房间一律放行；加密房间比对带盐哈希。</summary>
     public bool VerifyPassword(string? password)
-        => !HasPassword || RoomPassword.Verify(Id, password, _passwordHash);
+    {
+        string? hash;
+        lock (_sync) hash = _passwordHash;
+        return hash == null || RoomPassword.Verify(Id, password, hash);
+    }
+
+    /// <summary>校验邀请令牌（常量时间比较）。令牌匹配即可进房，无需房间密码。</summary>
+    public bool VerifyInviteToken(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) return false;
+
+        string current;
+        lock (_sync) current = _inviteToken;
+        if (current.Length == 0) return false;
+
+        var a = Encoding.UTF8.GetBytes(current);
+        var b = Encoding.UTF8.GetBytes(token);
+        return a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
+    /// <summary>作废并重新生成邀请令牌（旧的邀请码随即失效）。返回新令牌。</summary>
+    public string RotateInviteToken()
+    {
+        lock (_sync)
+        {
+            _inviteToken = NewInviteToken();
+            return _inviteToken;
+        }
+    }
+
+    private static string NewInviteToken()
+        => Convert.ToBase64String(RandomNumberGenerator.GetBytes(18))
+                  .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    // ==================== 房主设置 ====================
+
+    /// <summary>把当前设置整理成房主视角的 DTO（含邀请令牌，因此只能发给房主）。</summary>
+    public HostSettingsDto ToHostSettings()
+    {
+        lock (_sync)
+        {
+            return new HostSettingsDto
+            {
+                RoomId = Id,
+                RoomName = Name,
+                MaxPlayers = MaxPlayers,
+                MinPlayers = MinPlayers,
+                MaxPlayersLimit = MaxPlayersLimit,
+                HasPassword = _passwordHash != null,
+                InviteToken = _inviteToken,
+                Running = _game.Status == GameStatus.Running,
+                PlayerCount = _players.Count,
+                GameSettingsJson = _gameSettingsJson,
+                CustomGameSettings = _gameSettingsJson != null
+            };
+        }
+    }
+
+    /// <summary>
+    /// 房主修改房间设置。只传需要改的项：
+    /// <paramref name="maxPlayers"/> / <paramref name="newPassword"/> 为 null 表示不动；
+    /// <paramref name="clearPassword"/> 为 true 表示改成公开房间；
+    /// <paramref name="gameSettingsJson"/> 为 null 表示不动、空字符串表示恢复默认、其他值原样存入。
+    /// </summary>
+    public (bool ok, string msg) UpdateSettings(string connId, int? maxPlayers, string? newPassword,
+                                                bool clearPassword, string? gameSettingsJson)
+    {
+        lock (_sync)
+        {
+            var me = string.IsNullOrEmpty(connId)
+                ? null
+                : _players.FirstOrDefault(p => p.ConnectionId == connId);
+            if (me == null) return (false, ServerMessages.NotInRoom);
+            if (!me.IsHost) return (false, ServerMessages.OnlyHostCanEdit);
+
+            var running = _game.Status == GameStatus.Running;
+
+            if (maxPlayers.HasValue)
+            {
+                if (running) return (false, ServerMessages.SettingLockedInGame);
+
+                var value = maxPlayers.Value;
+                if (value < MinPlayers || value > MaxPlayersLimit)
+                    return (false, $"房间人数需在 {MinPlayers} - {MaxPlayersLimit} 之间。");
+                if (value < _players.Count)
+                    return (false, $"当前已有 {_players.Count} 人，人数上限不能小于它。");
+
+                _maxPlayersOverride = value == MaxPlayersLimit ? 0 : value;
+            }
+
+            if (clearPassword)
+            {
+                _passwordHash = null;   // 改成公开房间；邀请令牌不变，因此旧邀请码依然有效
+            }
+            else if (newPassword != null)
+            {
+                if (newPassword.Length < 3) return (false, "房间密码至少 3 位。");
+                _passwordHash = RoomPassword.Hash(Id, newPassword);
+            }
+
+            if (gameSettingsJson != null)
+            {
+                if (running) return (false, ServerMessages.SettingLockedInGame);
+                _gameSettingsJson = gameSettingsJson.Length == 0 ? null : gameSettingsJson;
+            }
+
+            return (true, "");
+        }
+    }
+
+    // ==================== 玩家管理 ====================
 
     /// <summary>按用户名（忽略大小写）查找房间内玩家。</summary>
     public RoomPlayer? GetPlayerByName(string username)
@@ -156,7 +301,7 @@ public class GameRoom : IGameContext
                 .ToList();
     }
 
-    /// <summary>生成房间列表摘要（含游戏元数据）。</summary>
+    /// <summary>生成房间列表摘要（含游戏元数据与房间实际人数上限）。</summary>
     public RoomInfoDto ToInfo()
     {
         lock (_sync)
@@ -170,15 +315,13 @@ public class GameRoom : IGameContext
                 GameName = info.DisplayName,
                 GameEmoji = info.Emoji,
                 PlayerCount = _players.Count,
-                MaxPlayers = info.MaxPlayers,
+                MaxPlayers = MaxPlayers,
                 Status = _game.Status.ToString(),
-                HasPassword = HasPassword,
+                HasPassword = _passwordHash != null,
                 Host = _players.FirstOrDefault(p => p.IsHost)?.Username ?? ""
             };
         }
     }
-
-    // ==================== 玩家管理 ====================
 
     /// <summary>加入或重连。返回 (成功, 错误, 玩家对象, 是否重连)</summary>
     public (bool ok, string msg, RoomPlayer? player, bool reconnected)
@@ -215,7 +358,7 @@ public class GameRoom : IGameContext
             }
             else
             {
-                var max = _game.Info.MaxPlayers;
+                var max = MaxPlayers;
                 if (_players.Count >= max)
                 {
                     result = (false, ServerMessages.RoomFull(max), null, false);
@@ -293,7 +436,7 @@ public class GameRoom : IGameContext
     // ==================== 开局 / 游戏操作（平台外壳） ====================
 
     /// <summary>
-    /// 房主开局：平台负责房主校验与在线玩家清理，玩法条件（人数下限等）由游戏实例判断；
+    /// 房主开局：平台负责房主校验与在线玩家清理，玩法条件（人数下限 / 身份布局校验等）由游戏实例判断；
     /// 成功后启动游戏主循环。
     /// </summary>
     public (bool ok, string msg) StartGame(string connId)

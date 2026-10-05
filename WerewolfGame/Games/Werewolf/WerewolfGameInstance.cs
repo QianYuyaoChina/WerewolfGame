@@ -5,7 +5,7 @@ using Werewolf.Client.Share;
 namespace Werewolf.Server.Games.Werewolf;
 
 /// <summary>狼人杀内部阶段机（游戏私有；框架不再感知阶段）。</summary>
-public enum Phase { Waiting, Night, Day, Discussion, Vote, HunterShoot, GameOver }
+public enum Phase { Waiting, Night, Day, Discussion, Vote, HunterShoot, SheriffTransfer, GameOver }
 
 /// <summary>
 /// 狼人杀玩法：把原 <c>GameRoom</c> 的全部狼人杀逻辑搬迁到这里。
@@ -43,12 +43,41 @@ public sealed class WerewolfGameInstance : IGameInstance
     private int _witchHealTarget = -1;
     private int _witchPoisonTarget = -1;
 
+    /// <summary>本局生效的身份布局（房主自定义或按人数推导的默认布局）。</summary>
+    private RoleLayout _layout = new();
+
+    /// <summary>当前持有警徽的玩家名（未配置警长或警徽已作废时为空）。</summary>
+    private string _sheriffName = "";
+
+    /// <summary>正在等待移交警徽的警长名（仅在 <see cref="Phase.SheriffTransfer"/> 期间非空）。</summary>
+    private string _sheriffTransferFrom = "";
+
     public WerewolfGameInstance(GameInfo info, IGameContext context)
     {
         Info = info ?? throw new ArgumentNullException(nameof(info));
         _ctx = context ?? throw new ArgumentNullException(nameof(context));
         _rules = context.Config.GetSection<GameRules>("GameRules") ?? new GameRules();
         _nightOrder = RoleInfo.ResolveNightOrder(_rules.NightOrder);
+        _layout = ParseLayout(context.GameSettingsJson);
+    }
+
+    /// <summary>
+    /// 解析房主设置的「游戏私有配置」（不透明 JSON）为身份布局。
+    /// 为空或解析失败时返回空布局，<see cref="Start"/> 会据此回退到按人数推导的默认布局。
+    /// </summary>
+    private static RoleLayout ParseLayout(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new RoleLayout();
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<RoleLayout>(json, Json);
+            return parsed ?? new RoleLayout();
+        }
+        catch
+        {
+            return new RoleLayout();   // 配置损坏时按「未自定义」处理，不影响开局
+        }
     }
 
     /// <inheritdoc />
@@ -73,15 +102,28 @@ public sealed class WerewolfGameInstance : IGameInstance
 
         var players = SnapshotPlayers();
 
+        // 房主可能在**房间创建之后**才设置或修改身份布局，因此开局前重新读一次
+        // （必须在进 _sync 之前读：该属性会取房间锁，锁序恒为「房间锁 → 游戏锁」）。
+        var settingsJson = _ctx.GameSettingsJson;
+        var roomMaxPlayers = _ctx.MaxPlayers;
+
         lock (_sync)
         {
-            // 人数上下限：优先用本游戏经配置下发的规则（与客户端门禁一致，运维可调），
-            // 规则未提供（0）时回退到游戏元数据 Info 的声明值。
+            // 人数上下限：下限优先用本游戏经配置下发的规则（运维可调），上限用**房间实际值**
+            // （房主可在游戏上限内调小，房间加入门禁用的也是它）。
             var minPlayers = _rules.MinPlayers > 0 ? _rules.MinPlayers : Info.MinPlayers;
-            var maxPlayers = _rules.MaxPlayers > 0 ? _rules.MaxPlayers : Info.MaxPlayers;
+            var maxPlayers = roomMaxPlayers;
 
             if (players.Count < minPlayers) return (false, $"至少需要 {minPlayers} 名玩家");
-            if (players.Count > maxPlayers) return (false, "玩家过多");
+            if (players.Count > maxPlayers) return (false, $"玩家过多（房间上限 {maxPlayers} 人）");
+
+            // 身份布局：房主自定义优先，未自定义则按人数推导默认布局（与改造前行为一致）。
+            // 开局前做**严格校验**：总数必须等于人数、至少 1 狼、狼人少于好人。
+            _layout = ParseLayout(settingsJson);
+            var layout = _layout.Total > 0 ? _layout : RoleLayout.Default(players.Count);
+            var check = layout.ValidateForGame(players.Count);
+            if (!check.ok) return (false, check.msg);
+            _layout = layout;
 
             foreach (var w in players)
             {
@@ -96,9 +138,20 @@ public sealed class WerewolfGameInstance : IGameInstance
                 w.VoteSubmitted = false;
                 w.HunterCanShoot = false;
                 w.HunterShotSubmitted = false;
+                w.LoverUsername = null;
+                w.HasBadge = false;
+                w.SheriffTransferTarget = -1;
+                w.SheriffTransferSubmitted = false;
             }
 
             AssignRoles(players);
+
+            // 配置了警长身份时，那名玩家就是初始持徽人。
+            _sheriffTransferFrom = "";
+            _sheriffName = players.FirstOrDefault(p => p.Role == Role.Sheriff)?.Username ?? "";
+            if (_sheriffName.Length > 0)
+                players.First(p => p.Role == Role.Sheriff).HasBadge = true;
+
             _day = 0;
             _phase = Phase.Waiting;
             _running = true;
@@ -122,6 +175,8 @@ public sealed class WerewolfGameInstance : IGameInstance
         _phase = Phase.Waiting;
         _running = false;
         _status = GameStatus.Waiting;
+        _sheriffName = "";
+        _sheriffTransferFrom = "";
 
         foreach (var w in _wp.Values)
         {
@@ -132,22 +187,28 @@ public sealed class WerewolfGameInstance : IGameInstance
             w.VoteSubmitted = false;
             w.HunterCanShoot = false;
             w.HunterShotSubmitted = false;
+            w.LoverUsername = null;
+            w.HasBadge = false;
+            w.SheriffTransferTarget = -1;
+            w.SheriffTransferSubmitted = false;
         }
     }
 
+    /// <summary>
+    /// 按<b>身份布局</b>给玩家分配身份。
+    /// 布局已由 <see cref="Start"/> 校验「总数 == 人数」，这里再做一次兜底补齐，保证不会越界。
+    /// </summary>
     private void AssignRoles(List<WerewolfPlayer> players)
     {
-        int n = players.Count;
         var roles = new List<Role>();
+        foreach (var role in Enum.GetValues<Role>())
+        {
+            var count = _layout.Get(RoleInfo.Name(role));
+            for (var i = 0; i < count; i++) roles.Add(role);
+        }
 
-        int wolves = n <= 5 ? 1 : n <= 8 ? 2 : 3;
-        for (int i = 0; i < wolves; i++) roles.Add(Role.Werewolf);
-
-        roles.Add(Role.Seer);
-        roles.Add(Role.Witch);
-        if (n >= 6) roles.Add(Role.Hunter);
-        if (n >= 9) roles.Add(Role.Guard);
-        while (roles.Count < n) roles.Add(Role.Villager);
+        while (roles.Count < players.Count) roles.Add(Role.Villager);
+        if (roles.Count > players.Count) roles.RemoveRange(players.Count, roles.Count - players.Count);
 
         for (int i = roles.Count - 1; i > 0; i--)
         {
@@ -184,6 +245,16 @@ public sealed class WerewolfGameInstance : IGameInstance
             {
                 var act = payload?.Deserialize<TargetPayload>(Json) ?? new TargetPayload();
                 return SubmitHunterShot(connectionId, act.TargetId);
+            }
+            case WerewolfOps.Cupid:
+            {
+                var act = payload?.Deserialize<CupidPayload>(Json) ?? new CupidPayload();
+                return SubmitCupid(connectionId, act.TargetA, act.TargetB);
+            }
+            case WerewolfOps.Sheriff:
+            {
+                var act = payload?.Deserialize<TargetPayload>(Json) ?? new TargetPayload();
+                return SubmitSheriffTransfer(connectionId, act.TargetId);
             }
             default:
                 return (false, "未知操作");
@@ -241,6 +312,49 @@ public sealed class WerewolfGameInstance : IGameInstance
         }
     }
 
+    /// <summary>丘比特：第一夜一次性指定两名玩家成为情侣。</summary>
+    private (bool ok, string msg) SubmitCupid(string connId, int a, int b)
+    {
+        var me = FindWpByConnection(connId);
+        var total = _ctx.Players.Count;   // 房间锁在此获取，绝不能在持有 _sync 时调用
+
+        lock (_sync)
+        {
+            if (_phase != Phase.Night || _actingRole != Role.Cupid) return (false, "还没轮到你行动");
+            if (me == null || !me.IsAlive) return (false, "你当前无法行动");
+            if (a < 0 || b < 0 || a >= total || b >= total) return (false, "请选择两名有效玩家");
+            if (a == b) return (false, "情侣必须是两名不同的玩家");
+
+            me.NightTarget = a;
+            me.NightTarget2 = b;
+            me.NightActionSubmitted = true;
+            return (true, "");
+        }
+    }
+
+    /// <summary>警长：把自己的警徽移交给一名存活玩家（-1 表示放弃，警徽作废）。</summary>
+    private (bool ok, string msg) SubmitSheriffTransfer(string connId, int targetId)
+    {
+        var me = FindWpByConnection(connId);
+        var players = _ctx.Players;   // 同上：先取房间快照，再进游戏锁
+        var targetAlive = targetId < 0 || (targetId < players.Count && players[targetId].IsAlive);
+        var myId = me == null ? -1 : IdOf(me);
+
+        lock (_sync)
+        {
+            if (_phase != Phase.SheriffTransfer) return (false, "当前不是警徽移交阶段");
+            if (me == null || me.SheriffTransferSubmitted
+                || !string.Equals(me.Username, _sheriffTransferFrom, StringComparison.OrdinalIgnoreCase))
+                return (false, "当前无法移交警徽");
+            if (targetId >= 0 && targetId == myId) return (false, "不能把警徽移交给自己");
+            if (!targetAlive) return (false, "目标已出局");
+
+            me.SheriffTransferTarget = targetId;
+            me.SheriffTransferSubmitted = true;
+            return (true, "");
+        }
+    }
+
     // ==================== 玩家变更通知 ====================
 
     /// <inheritdoc />
@@ -267,6 +381,14 @@ public sealed class WerewolfGameInstance : IGameInstance
     {
         try
         {
+            string summary, sheriff;
+            lock (_sync) { summary = _layout.Describe(); sheriff = _sheriffName; }
+
+            // 开局先把**最终身份配置**公布给房间内所有玩家（配置本身不是机密，谁是什么身份才是）。
+            await _ctx.BroadcastAsync($"📋 本局身份配置：{summary}");
+            if (sheriff.Length > 0)
+                await _ctx.BroadcastAsync($"🎖 {sheriff} 抽到了警长身份（投票计 1.5 票，出局时可移交警徽）。");
+
             await SendAllRolesAsync();
             await _ctx.BroadcastAsync("🎮 游戏开始！");
             await _ctx.BroadcastStateAsync();
@@ -315,11 +437,54 @@ public sealed class WerewolfGameInstance : IGameInstance
     {
         switch (role)
         {
+            case Role.Cupid: await CupidStepAsync(); return;
             case Role.Guard: await GuardStepAsync(); return;
             case Role.Werewolf: await WerewolfStepAsync(); return;
             case Role.Witch: await WitchStepAsync(); return;
             case Role.Seer: await SeerStepAsync(); return;
         }
+    }
+
+    /// <summary>丘比特：只在**第一夜**指定两名玩家成为情侣；之后夜间轮到它时直接跳过。</summary>
+    private async Task CupidStepAsync()
+    {
+        var cupids = AliveWithRole(Role.Cupid);
+        if (cupids.Count == 0) return;
+
+        int day;
+        lock (_sync) day = _day;
+        if (day > 1) return;   // 只有第一夜行动
+
+        var cupid = cupids[0];
+        await _ctx.PrivateAsync(cupid.ConnectionId,
+            "【丘比特】请指定两名玩家成为情侣（聊天输入 `cupid 编号1 编号2`）。\n" +
+            "他们其中一方出局，另一方会立刻殉情。");
+        await WaitNightActionAsync(Role.Cupid, _rules.NightActionMs);
+
+        int a, b;
+        lock (_sync) { a = cupid.NightTarget; b = cupid.NightTarget2; }
+
+        if (a >= 0 && b >= 0 && a != b && IsAlive(a) && IsAlive(b))
+        {
+            var pa = PlayerById(a);
+            var pb = PlayerById(b);
+            if (pa != null && pb != null)
+            {
+                lock (_sync)
+                {
+                    pa.LoverUsername = pb.Username;
+                    pb.LoverUsername = pa.Username;
+                }
+
+                await _ctx.PrivateAsync(cupid.ConnectionId,
+                    $"💘 你让 [{a}]{pa.Username} 与 [{b}]{pb.Username} 成为了情侣。");
+                await PrivateAsync(pa, $"💘 你与 [{b}]{pb.Username} 成为了情侣：对方出局你也会殉情。");
+                await PrivateAsync(pb, $"💘 你与 [{a}]{pa.Username} 成为了情侣：对方出局你也会殉情。");
+                return;
+            }
+        }
+
+        await _ctx.PrivateAsync(cupid.ConnectionId, "你今晚没有指定情侣。");
     }
 
     /// <summary>守卫：守护一名玩家，不能连续两晚守护同一人。</summary>
@@ -437,7 +602,6 @@ public sealed class WerewolfGameInstance : IGameInstance
     {
         SetPhase(Phase.Day);
 
-        var deaths = new List<int>();
         int wolfTarget, guardTarget, healTarget, poisonTarget;
         lock (_sync)
         {
@@ -447,32 +611,36 @@ public sealed class WerewolfGameInstance : IGameInstance
             poisonTarget = _witchPoisonTarget;
         }
 
-        if (wolfTarget >= 0)
+        // 先算出「本应出局」的人，再走统一死亡结算（会自动带上情侣殉情）。
+        var planned = new List<WerewolfPlayer>();
+        if (wolfTarget >= 0 && guardTarget != wolfTarget && healTarget != wolfTarget)
         {
-            bool saved = guardTarget == wolfTarget || healTarget == wolfTarget;
-            if (!saved) deaths.Add(wolfTarget);
+            var v = PlayerById(wolfTarget);
+            if (v != null) planned.Add(v);
         }
-        if (poisonTarget >= 0 && !deaths.Contains(poisonTarget))
-            deaths.Add(poisonTarget);
+        if (poisonTarget >= 0)
+        {
+            var v = PlayerById(poisonTarget);
+            if (v != null && !planned.Contains(v)) planned.Add(v);
+        }
 
-        foreach (var id in deaths)
-        {
-            var p = PlayerById(id);
-            if (p != null) p.IsAlive = false;
-        }
+        var poisonVictim = poisonTarget >= 0 ? PlayerById(poisonTarget) : null;
+        var dead = ApplyDeaths(planned);
 
         await _ctx.BroadcastAsync($"════ 第 {_day} 天 · 天亮了 ════");
-        await _ctx.BroadcastAsync(deaths.Count == 0
+        await _ctx.BroadcastAsync(dead.Count == 0
             ? "🌤 昨晚是平安夜，没有人死亡。"
-            : $"💀 昨晚死亡的是：{string.Join("、", deaths.Select(d => $"[{d}]{NameOf(d)}"))}");
+            : $"💀 昨晚死亡的是：{string.Join("、", dead.Select(Label))}");
+        await AnnounceLoversAsync(dead);
 
-        foreach (var id in deaths)
+        foreach (var w in dead)
         {
-            var p = PlayerById(id);
-            if (p != null && p.Role == Role.Hunter && id != poisonTarget)
-                await HunterShootAsync(p);
+            // 被毒死的猎人不能开枪（沿用旧规则）。
+            if (w.Role == Role.Hunter && !ReferenceEquals(w, poisonVictim))
+                await HunterShootAsync(w);
         }
 
+        await TrySheriffTransferAsync(dead);
         if (await CheckGameOverAsync()) return;
 
         SetPhase(Phase.Discussion);
@@ -505,10 +673,11 @@ public sealed class WerewolfGameInstance : IGameInstance
         Dictionary<int, int> tally;
         lock (_sync)
         {
+            // 计票用「权重」：普通玩家 2 = 1 票，警长 3 = 1.5 票（整数避免浮点误差）。
             tally = _wp.Values
                 .Where(w => w.IsAlive && w.VoteTarget >= 0)
                 .GroupBy(w => w.VoteTarget)
-                .ToDictionary(g => g.Key, g => g.Count());
+                .ToDictionary(g => g.Key, g => g.Sum(w => w.HasBadge ? 3 : 2));
         }
 
         if (tally.Count == 0)
@@ -518,7 +687,7 @@ public sealed class WerewolfGameInstance : IGameInstance
         }
 
         await _ctx.BroadcastAsync("📊 投票结果：" + string.Join("　",
-            tally.OrderByDescending(kv => kv.Value).Select(kv => $"[{kv.Key}]{NameOf(kv.Key)} {kv.Value}票")));
+            tally.OrderByDescending(kv => kv.Value).Select(kv => $"[{kv.Key}]{NameOf(kv.Key)} {kv.Value / 2.0:0.#}票")));
 
         int max = tally.Values.Max();
         var top = tally.Where(kv => kv.Value == max).Select(kv => kv.Key).ToList();
@@ -533,12 +702,15 @@ public sealed class WerewolfGameInstance : IGameInstance
         int outId = top[0];
         var outP = PlayerById(outId);
         if (outP == null) return;
-        lock (_sync) outP.IsAlive = false;
+
+        var dead = ApplyDeaths(new[] { outP });
         await _ctx.BroadcastAsync($"⚖️ [{outId}]{outP.Username} 被投票放逐。");
+        await AnnounceLoversAsync(dead.Where(w => !ReferenceEquals(w, outP)));
 
         if (outP.Role == Role.Hunter)
             await HunterShootAsync(outP);
 
+        await TrySheriffTransferAsync(dead);
         await _ctx.BroadcastStateAsync();
     }
 
@@ -569,8 +741,13 @@ public sealed class WerewolfGameInstance : IGameInstance
         if (target >= 0 && IsAlive(target))
         {
             var t = PlayerById(target);
-            if (t != null) lock (_sync) t.IsAlive = false;
-            await _ctx.BroadcastAsync($"🔫 猎人 [{IdOf(hunter)}]{hunter.Username} 开枪带走了 [{target}]{t?.Username}。");
+            if (t != null)
+            {
+                var extra = ApplyDeaths(new[] { t });
+                await _ctx.BroadcastAsync($"🔫 猎人 [{IdOf(hunter)}]{hunter.Username} 开枪带走了 [{target}]{t.Username}。");
+                await AnnounceLoversAsync(extra.Where(w => !ReferenceEquals(w, t)));
+                await TrySheriffTransferAsync(extra);
+            }
         }
         else
         {
@@ -578,6 +755,116 @@ public sealed class WerewolfGameInstance : IGameInstance
         }
         await _ctx.BroadcastStateAsync();
     }
+
+    // ==================== 死亡结算 / 警徽移交 ====================
+
+    /// <summary>
+    /// **统一的死亡结算入口**：置死亡 → 触发情侣殉情（链式）→ 返回本次实际出局的全部玩家。
+    /// 调用方据此处理「猎人开枪 / 警徽移交」等淘汰后效果。
+    /// </summary>
+    private List<WerewolfPlayer> ApplyDeaths(IEnumerable<WerewolfPlayer> victims)
+    {
+        var dead = new List<WerewolfPlayer>();
+
+        lock (_sync)
+        {
+            var queue = new Queue<WerewolfPlayer>(victims.Where(v => v.IsAlive));
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            while (queue.Count > 0)
+            {
+                var w = queue.Dequeue();
+                if (!w.IsAlive || !seen.Add(w.Username)) continue;
+
+                w.IsAlive = false;
+                dead.Add(w);
+
+                // 情侣殉情：一方出局，另一方立刻跟随（情侣只有两人，不会无限递归）。
+                if (!string.IsNullOrEmpty(w.LoverUsername)
+                    && _wp.TryGetValue(w.LoverUsername, out var lover) && lover.IsAlive)
+                    queue.Enqueue(lover);
+            }
+        }
+
+        return dead;
+    }
+
+    /// <summary>广播「因情侣出局而殉情」的提示。</summary>
+    private async Task AnnounceLoversAsync(IEnumerable<WerewolfPlayer> dead)
+    {
+        foreach (var w in dead)
+            await _ctx.BroadcastAsync($"💔 [{IdOf(w)}]{w.Username} 因情侣出局而殉情。");
+    }
+
+    /// <summary>
+    /// 若本次出局者包含**当前警长**且场上还有存活玩家，则进入「警徽移交」阶段：
+    /// 由警长选一名存活玩家接手，超时或放弃则警徽作废。
+    /// </summary>
+    private async Task TrySheriffTransferAsync(IEnumerable<WerewolfPlayer> dead)
+    {
+        WerewolfPlayer? sheriff;
+        lock (_sync)
+        {
+            sheriff = null;
+            if (_sheriffName.Length > 0
+                && dead.Any(w => string.Equals(w.Username, _sheriffName, StringComparison.OrdinalIgnoreCase))
+                && _wp.TryGetValue(_sheriffName, out var found))
+                sheriff = found;
+        }
+        if (sheriff == null) return;
+
+        if (!SnapshotPlayers().Any(w => w.IsAlive && w.IsConnected))
+        {
+            lock (_sync) _sheriffName = "";   // 场上没人了，警徽自然作废
+            return;
+        }
+
+        lock (_sync)
+        {
+            _sheriffTransferFrom = sheriff.Username;
+            sheriff.SheriffTransferTarget = -1;
+            sheriff.SheriffTransferSubmitted = false;
+        }
+
+        SetPhase(Phase.SheriffTransfer);
+        await _ctx.BroadcastAsync($"🎖 {sheriff.Username} 是警长，需要移交警徽。");
+        await PrivateAsync(sheriff, "【警徽移交】请选择一名存活玩家接受警徽，或输入 -1 让警徽作废。");
+        await _ctx.BroadcastStateAsync();
+
+        await WaitUntilAsync(() =>
+        {
+            lock (_sync) return sheriff.SheriffTransferSubmitted;
+        }, _rules.HunterShotMs);
+
+        int target;
+        lock (_sync)
+        {
+            target = sheriff.SheriffTransferTarget;
+            _sheriffTransferFrom = "";
+        }
+
+        var players = _ctx.Players;
+        if (target >= 0 && target < players.Count && players[target].IsAlive)
+        {
+            var newSheriff = players[target].Username;
+            lock (_sync)
+            {
+                _sheriffName = newSheriff;
+                if (_wp.TryGetValue(newSheriff, out var next)) next.HasBadge = true;
+            }
+            await _ctx.BroadcastAsync($"🎖 警徽移交给了 [{target}]{newSheriff}。");
+        }
+        else
+        {
+            lock (_sync) _sheriffName = "";
+            await _ctx.BroadcastAsync("🎖 警徽已作废，本局不再有警长。");
+        }
+
+        await _ctx.BroadcastStateAsync();
+    }
+
+    /// <summary>玩家在广播里的展示形式：<c>[3]张三</c>。</summary>
+    private string Label(WerewolfPlayer w) => $"[{IdOf(w)}]{w.Username}";
 
     // ==================== 胜负判定 ====================
 
@@ -615,6 +902,7 @@ public sealed class WerewolfGameInstance : IGameInstance
         int day;
         Role? actingRole;
         GameRules rules;
+        string summary, sheriff, transferFrom;
         lock (_sync)
         {
             w = _wp.TryGetValue(me.Username, out var found) ? found : null;
@@ -622,6 +910,9 @@ public sealed class WerewolfGameInstance : IGameInstance
             day = _day;
             actingRole = _actingRole;
             rules = _rules;
+            summary = _layout.Total > 0 ? _layout.Describe() : "";
+            sheriff = _sheriffName;
+            transferFrom = _sheriffTransferFrom;
         }
         if (w == null) return null;
 
@@ -632,7 +923,14 @@ public sealed class WerewolfGameInstance : IGameInstance
             YourRole = RoleInfo.Name(w.Role),
             YourRoleDesc = RoleInfo.Desc(w.Role),
             ActingRole = actingRole.HasValue ? RoleInfo.Name(actingRole.Value) : "",
-            Rules = rules
+            Rules = rules,
+            RoleSummary = summary,
+            SheriffName = sheriff,
+            SheriffEnabled = _layout.Get(Roles.Sheriff) > 0,
+            YouTransferBadge = transferFrom.Length > 0
+                               && string.Equals(transferFrom, me.Username, StringComparison.OrdinalIgnoreCase),
+            IsLover = w.IsLover,
+            LoverName = w.LoverUsername ?? ""
         };
         return JsonSerializer.SerializeToNode(payload, Json);
     }
@@ -645,10 +943,12 @@ public sealed class WerewolfGameInstance : IGameInstance
 
         WerewolfPlayer? viewer;
         bool revealAll;
+        string sheriff;
         lock (_sync)
         {
             viewer = _wp.TryGetValue(viewerUsername, out var v) ? v : null;
             revealAll = !_running || _phase == Phase.GameOver;
+            sheriff = _sheriffName;
         }
 
         foreach (var row in rows)
@@ -660,6 +960,14 @@ public sealed class WerewolfGameInstance : IGameInstance
             {
                 row.Tag = null;
                 row.TagColor = null;
+                continue;
+            }
+
+            // 警徽是**公开信息**：当前持徽人对所有人显示「警长」，与他的真实身份是否公开无关。
+            if (sheriff.Length > 0 && string.Equals(row.Name, sheriff, StringComparison.OrdinalIgnoreCase))
+            {
+                row.Tag = Roles.Sheriff;
+                row.TagColor = RoleInfo.ColorHex(Role.Sheriff);
                 continue;
             }
 

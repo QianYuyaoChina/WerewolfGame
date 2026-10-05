@@ -17,4 +17,10 @@ public static class WerewolfOps
 
     /// <summary>猎人开枪。payload: { TargetId:int }（-1 放弃）。</summary>
     public const string Hunter = "hunter";
+
+    /// <summary>丘比特第一夜指定情侣。payload: <c>CupidPayload { TargetA:int, TargetB:int }</c>。</summary>
+    public const string Cupid = "cupid";
+
+    /// <summary>警长移交警徽。payload: { TargetId:int }（-1 放弃，警徽作废）。</summary>
+    public const string Sheriff = "sheriff";
 }

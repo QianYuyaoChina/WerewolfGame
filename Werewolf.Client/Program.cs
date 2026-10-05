@@ -365,16 +365,12 @@ class Program
         }
         if (line.Equals("invite", StringComparison.OrdinalIgnoreCase))
         {
-            var code = _client.CreateInviteCode();
-            if (string.IsNullOrEmpty(code))
-            {
-                Print("⚠️ 当前不在房间中，无法生成邀请码。");
-                return;
-            }
-
-            Print("──────── 邀请码（发给好友，对方粘贴后可直接进入本房间，无需输入密码）────────");
-            Print(code);
-            Print("──────────────────────────────────────────────────────");
+            await ShowInviteAsync();
+            return;
+        }
+        if (line.Equals("host", StringComparison.OrdinalIgnoreCase))
+        {
+            await HostSettingsMenuAsync();
             return;
         }
 
@@ -390,6 +386,90 @@ class Program
     static void Print(string msg)
     {
         lock (ConsoleLock) Console.WriteLine(msg);
+    }
+
+    // ==================== 房主设置 ====================
+
+    /// <summary>
+    /// 生成并打印当前房间的邀请码。
+    /// 邀请令牌只发给房主，因此非房主会看到失败提示（与 GUI 一致）。
+    /// </summary>
+    static async Task ShowInviteAsync()
+    {
+        var got = await _client.GetHostSettingsAsync();
+        if (!got.Ok || got.Settings == null)
+        {
+            Print("⚠️ " + (string.IsNullOrEmpty(got.Message) ? "只有房主可以生成邀请码。" : got.Message));
+            return;
+        }
+
+        var code = _client.CreateInviteCode(got.Settings.InviteToken);
+        if (string.IsNullOrEmpty(code)) { Print("⚠️ 生成邀请码失败。"); return; }
+
+        Print("\n──────── 邀请码（发给好友，对方粘贴后可直接进入本房间，无需输入密码）────────");
+        Print(code);
+        Print("提示：改房间密码不会让这个码失效；如需作废，用 host → 4 重置邀请令牌。");
+        Print("──────────────────────────────────────────────────────");
+    }
+
+    /// <summary>房主设置文本菜单：最大人数 / 密码 / 邀请码 / 重置邀请码。</summary>
+    static async Task HostSettingsMenuAsync()
+    {
+        var got = await _client.GetHostSettingsAsync();
+        if (!got.Ok || got.Settings == null)
+        {
+            Print("⚠️ " + (string.IsNullOrEmpty(got.Message) ? "只有房主可以修改房间设置。" : got.Message));
+            return;
+        }
+
+        var st = got.Settings;
+        Print($@"
+──────── 房主设置（房间 {st.RoomId} · {st.RoomName}）────────
+  1) 最大人数：{st.MaxPlayers}（允许 {st.MinPlayers}-{st.MaxPlayersLimit}）{(st.Running ? " · 游戏进行中不可修改" : "")}
+  2) 房间密码：{(st.HasPassword ? "已设置" : "公开房间")}
+  3) 生成邀请码
+  4) 重置邀请码（让旧码立即失效）
+  0) 返回
+提示：凭邀请码进房不需要密码，因此改密码不会让已发出的邀请码失效。");
+        Console.Write("请选择（0-4）：");
+        var pick = (Console.ReadLine() ?? "").Trim();
+
+        switch (pick)
+        {
+            case "1":
+                Console.Write($"新的最大人数（{st.MinPlayers}-{st.MaxPlayersLimit}）：");
+                if (int.TryParse(Console.ReadLine(), out var max))
+                {
+                    var r = await _client.UpdateRoomSettingsAsync(max, null, false);
+                    Print(r.Ok ? $"✅ 最大人数已设为 {max}。" : "⚠️ " + r.Message);
+                }
+                else Print("⚠️ 请输入数字。");
+                break;
+
+            case "2":
+                Console.Write("新密码（回车保持不变；输入单个 - 表示清除密码、改为公开房间）：");
+                var pwd = ReadPassword();
+                if (pwd == "-")
+                {
+                    var r0 = await _client.UpdateRoomSettingsAsync(null, null, true);
+                    Print(r0.Ok ? "✅ 已改为公开房间。" : "⚠️ " + r0.Message);
+                }
+                else if (pwd.Length > 0)
+                {
+                    var r1 = await _client.UpdateRoomSettingsAsync(null, pwd, false);
+                    Print(r1.Ok ? "✅ 房间密码已更新（已发出的邀请码仍然有效）。" : "⚠️ " + r1.Message);
+                }
+                break;
+
+            case "3":
+                await ShowInviteAsync();
+                break;
+
+            case "4":
+                var rot = await _client.ResetInviteAsync();
+                Print(rot.Ok ? "✅ 已重置邀请令牌，旧的邀请码立即失效。" : "⚠️ " + rot.Message);
+                break;
+        }
     }
 
     static void RenderState(GameStateDto s)
@@ -411,6 +491,7 @@ class Program
 ──────────── 指令帮助 ────────────
   start              房主开始游戏
   invite             生成邀请码（好友粘贴后可直接进本房间，含密码）
+  host               房主设置（最大人数 / 密码 / 邀请码 / 重置邀请码）
   leave              退出当前房间，返回房间列表
                        （房主且房间只剩你时，会直接关闭该房间）
   chat 内容          发言

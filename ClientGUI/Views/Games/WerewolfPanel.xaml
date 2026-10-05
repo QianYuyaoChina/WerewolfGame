@@ -35,6 +35,17 @@
                                TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
                     <TextBlock Text="{Binding MeText}" FontSize="10.5" Margin="0,6,0,0"
                                Foreground="{DynamicResource FaintBrush}" />
+
+                    <!-- 情侣 / 警长（有才显示） -->
+                    <TextBlock Text="{Binding LoverText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSoftBrush}" />
+                    <TextBlock Text="{Binding SheriffText}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSoftBrush}" />
+
+                    <!-- 本局身份配置（开局时服务端已向全房间公布） -->
+                    <TextBlock Text="{Binding RoleSummary}" FontSize="10.5" Margin="0,6,0,0" TextWrapping="Wrap"
+                               Foreground="{DynamicResource FaintBrush}"
+                               Visibility="{Binding HasRoleSummary, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
             </Border>
 
@@ -70,7 +81,7 @@
 
             <TextBlock Text="玩法提示" Style="{StaticResource SectionTitle}" />
             <TextBlock FontSize="11" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
-                       Text="· 夜晚：狼人选择击杀目标，预言家查验，女巫用药，守卫守护。&#x0a;· 白天：讨论后投票放逐一名玩家。&#x0a;· 猎人出局时可开枪带走一名玩家。&#x0a;· 指令与服务器约定一致：数字编号选择目标，-1 表示弃票 / 放弃。" />
+                       Text="· 夜晚：丘比特首夜牵线，狼人选择击杀目标，预言家查验，女巫用药，守卫守护。&#x0a;· 白天：讨论后投票放逐一名玩家；警长投票计 1.5 票，并可移交警徽。&#x0a;· 猎人出局时可开枪带走一名玩家；情侣一方出局另一方殉情。&#x0a;· 身份配置由房主在「房主设置」里自定义，开局时会公布给全房间。&#x0a;· 指令与服务器约定一致：数字编号选择目标，-1 表示弃票 / 放弃。" />
         </StackPanel>
     </ScrollViewer>
 </UserControl>

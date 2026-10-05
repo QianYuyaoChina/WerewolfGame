@@ -39,6 +39,18 @@ public interface IGameContext
     /// <summary>只读配置门面：游戏自取规则，无需改组合根。</summary>
     IGameConfig Config { get; }
 
+    /// <summary>
+    /// 房间**实际**的最大人数（房主可在游戏上限内调小）。房间加入门禁用的就是这个值，
+    /// 游戏在开局校验人数时也应使用它。
+    /// </summary>
+    int MaxPlayers { get; }
+
+    /// <summary>
+    /// 房主为本房间设置的「游戏私有配置」（不透明 JSON 字符串，由游戏自己解释）。
+    /// 平台不解析它，只负责存储与透传；null 表示房主未自定义，游戏应回退到自己的默认配置。
+    /// </summary>
+    string? GameSettingsJson { get; }
+
     /// <summary>广播一条系统消息（加密后发所有在线玩家）。</summary>
     Task BroadcastAsync(string text);
 

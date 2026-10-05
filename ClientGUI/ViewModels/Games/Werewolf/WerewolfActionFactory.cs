@@ -35,6 +35,17 @@ public sealed class ActionContext
 
     /// <summary>本局已用掉的药水。</summary>
     public IReadOnlySet<string> PotionsUsed { get; init; } = new HashSet<string>();
+
+    // ---- 丘比特 / 警长（v2.1） ----
+
+    /// <summary>丘比特已记下的情侣①编号（-1 表示还没记）。</summary>
+    public int CupidTargetA { get; init; } = -1;
+
+    /// <summary>丘比特已记下的情侣②编号（-1 表示还没记）。</summary>
+    public int CupidTargetB { get; init; } = -1;
+
+    /// <summary>当前是否由「我」移交警徽（警长被淘汰且轮到其选择）。</summary>
+    public bool IsSheriffTransferor { get; init; }
 }
 
 /// <summary>一次操作面板的构建结果：按钮列表 + 阶段提示。</summary>
@@ -69,6 +80,7 @@ public sealed class WerewolfActionFactory
         Phases.Night => Night(c),
         Phases.Vote => Vote(c),
         Phases.HunterShoot => HunterShoot(c),
+        Phases.SheriffTransfer => SheriffTransfer(c),
         Phases.Day => ActionPlan.HintOnly("天亮了，等待主持人公布昨夜结果…"),
         Phases.Discussion => ActionPlan.HintOnly("自由讨论中，使用下方输入框发言。"),
         Phases.GameOver => ActionPlan.HintOnly("本局已结束，可重新开始或继续等待。"),
@@ -124,9 +136,88 @@ public sealed class WerewolfActionFactory
             case Roles.Witch:
                 return Witch(c);
 
+            case Roles.Cupid:
+                return Cupid(c);
+
             default:
                 return ActionPlan.HintOnly("你是平民，夜晚没有行动，请闭眼等待天亮。");
         }
+    }
+
+    /// <summary>丘比特：第一夜指定两名玩家成为情侣（需要分别记下两个人再确认）。</summary>
+    private ActionPlan Cupid(ActionContext c)
+    {
+        var a = c.CupidTargetA;
+        var b = c.CupidTargetB;
+        var picked = a >= 0 && b >= 0;
+
+        var actions = new[]
+        {
+            new GameAction
+            {
+                Label = "💘 记为情侣①",
+                Command = _commands.SetCupidA,
+                IsEnabled = c.SelectedTargetId >= 0,
+                Variant = "normal",
+                Hint = a >= 0 ? $"已记下 [{a}]" : "把当前选中的玩家记为第一位"
+            },
+            new GameAction
+            {
+                Label = "💘 记为情侣②",
+                Command = _commands.SetCupidB,
+                IsEnabled = c.SelectedTargetId >= 0 && c.SelectedTargetId != a,
+                Variant = "normal",
+                Hint = b >= 0 ? $"已记下 [{b}]" : "把当前选中的玩家记为第二位"
+            },
+            new GameAction
+            {
+                Label = "✅ 确认情侣",
+                Command = _commands.ConfirmCupid,
+                IsEnabled = picked,
+                Variant = "primary",
+                Hint = picked ? $"[{a}] 与 [{b}] 成为情侣" : "先记下两名玩家"
+            }
+        };
+
+        var hint = picked
+            ? $"情侣：[{a}] 与 [{b}]。点击【确认情侣】提交；一方出局另一方会殉情。"
+            : a >= 0
+                ? $"已记下情侣①=[{a}]，再选一名玩家并点击【记为情侣②】，最后确认。"
+                : "点击左侧玩家 → 【记为情侣①】，再选另一名 → 【记为情侣②】，最后【确认情侣】。";
+
+        return new ActionPlan(actions, hint);
+    }
+
+    /// <summary>警徽移交：警长被淘汰时把警徽交给一名存活玩家（或让它作废）。</summary>
+    private ActionPlan SheriffTransfer(ActionContext c)
+    {
+        if (!c.IsSheriffTransferor) return ActionPlan.HintOnly("等待警长移交警徽…");
+
+        var actions = new[]
+        {
+            new GameAction
+            {
+                Label = "🎖 移交警徽",
+                Command = _commands.TransferBadge,
+                Parameter = "sheriff",
+                IsEnabled = c.SelectedTargetId >= 0,
+                Variant = "primary",
+                Hint = c.SelectedTargetId >= 0 ? $"移交给 [{c.SelectedTargetId}]" : "请先选择玩家"
+            },
+            new GameAction
+            {
+                Label = "作废警徽",
+                Command = _commands.VoidBadge,
+                Variant = "normal",
+                Hint = "本局不再有警长"
+            }
+        };
+
+        var hint = c.SelectedTargetId >= 0
+            ? $"已选择 [{c.SelectedTargetId}]，点击【移交警徽】移交；接手者投票计 1.5 票。"
+            : "你已出局，点击一名存活玩家接手警徽，或选择让警徽作废。";
+
+        return new ActionPlan(actions, hint);
     }
 
     private ActionPlan Witch(ActionContext c)

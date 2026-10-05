@@ -139,6 +139,9 @@ public class GameHub : Hub
                 Ops.JoinRoom => await HandleJoinRoomAsync(request.Payload),
                 Ops.LeaveRoom => await HandleLeaveRoomAsync(request.Payload),
                 Ops.State => HandleState(),
+                Ops.HostSettings => HandleHostSettings(),
+                Ops.RoomSettings => HandleRoomSettings(request.Payload),
+                Ops.ResetInvite => HandleResetInvite(),
                 Ops.Start => await HandleStartAsync(),
                 Ops.Chat => await HandleChatAsync(request.Payload),
                 Ops.Ping => RpcReply.Success(),
@@ -259,7 +262,7 @@ public class GameHub : Hub
         var roomId = (req.RoomId ?? "").Trim();
         if (roomId.Length == 0) return RpcReply.Error(ServerMessages.RoomNotFound);
 
-        var (ok, msg, joinedRoomId, reconnected) = _rooms.JoinRoom(roomId, Context.ConnectionId, req.Password);
+        var (ok, msg, joinedRoomId, reconnected) = _rooms.JoinRoom(roomId, Context.ConnectionId, req.Password, req.InviteToken);
         if (!ok) return RpcReply.Error(msg);
 
         var room = _rooms.Find(joinedRoomId);
@@ -337,6 +340,54 @@ public class GameHub : Hub
             Ok = true,
             Msg = "",
             Payload = JsonSerializer.SerializeToNode(dto, Json)
+        };
+    }
+
+    /// <summary>房主拉取本房间设置（含邀请令牌）；非房主或不在房间则拒绝。</summary>
+    private RpcReply HandleHostSettings()
+    {
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
+
+        var me = room.GetPlayer(Context.ConnectionId);
+        if (me == null || !me.IsHost) return RpcReply.Error(ServerMessages.OnlyHostCanEdit);
+
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(room.ToHostSettings(), Json)
+        };
+    }
+
+    /// <summary>房主修改房间设置（最大人数 / 密码 / 身份布局）。</summary>
+    private RpcReply HandleRoomSettings(JsonNode? payload)
+    {
+        var req = payload?.Deserialize<UpdateRoomSettingsPayload>(Json) ?? new UpdateRoomSettingsPayload();
+        var (ok, msg) = _rooms.UpdateSettings(Context.ConnectionId, req.MaxPlayers, req.NewPassword,
+                                              req.ClearPassword, req.GameSettingsJson);
+        if (!ok) return RpcReply.Error(msg);
+
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "updated",
+            Payload = room == null ? null : JsonSerializer.SerializeToNode(room.ToHostSettings(), Json)
+        };
+    }
+
+    /// <summary>房主作废并重新生成邀请令牌（旧邀请码随即失效）。</summary>
+    private RpcReply HandleResetInvite()
+    {
+        var (ok, msg, room) = _rooms.RotateInvite(Context.ConnectionId);
+        if (!ok) return RpcReply.Error(msg);
+
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "rotated",
+            Payload = room == null ? null : JsonSerializer.SerializeToNode(room.ToHostSettings(), Json)
         };
     }
 

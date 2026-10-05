@@ -324,8 +324,31 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
 
     // ==================== 邀请码 / 房间保留 ====================
 
-    /// <summary>生成当前房间的邀请码（含服务器地址与房间密码）；不在房间时返回 null。</summary>
-    public string? GenerateInviteCode() => _client.CreateInviteCode();
+    /// <summary>
+    /// 生成当前房间的邀请码。邀请令牌只有房主能从服务器拿到（<c>hostsettings</c>），
+    /// 因此非房主会返回带失败提示的结果。
+    /// </summary>
+    public async Task<(bool ok, string code, string message)> GenerateInviteCodeAsync()
+    {
+        if (!IsJoined) return (false, "", "请先加入或创建一个房间。");
+        if (!IsHost) return (false, "", "只有房主可以生成邀请码。");
+
+        try
+        {
+            var settings = await _client.GetHostSettingsAsync();
+            if (!settings.Ok || settings.Settings == null)
+                return (false, "", string.IsNullOrEmpty(settings.Message) ? "无法获取房间设置。" : settings.Message);
+
+            var code = _client.CreateInviteCode(settings.Settings.InviteToken);
+            return string.IsNullOrEmpty(code)
+                ? (false, "", "无法生成邀请码。")
+                : (true, code, "");
+        }
+        catch (Exception ex)
+        {
+            return (false, "", ex.Message);
+        }
+    }
 
     /// <summary>
     /// 是否需要询问「是否保留房间」：本人是房主、已进房，且房间内没有其他玩家。

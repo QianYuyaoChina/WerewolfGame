@@ -126,35 +126,78 @@ public static class HostInviteProbe
                 Pass($"列表一致：{info.Name} {info.PlayerCount}/{info.MaxPlayers} 房主={info.Host} 加密={info.HasPassword}");
             else Fail($"列表内容不符：人数={info.PlayerCount} 房主={info.Host} 加密={info.HasPassword}");
 
-            // ---------- 2. 邀请码：生成 → 解析 → 免密码进房 ----------
-            var code = host.CreateInviteCode();
-            if (string.IsNullOrEmpty(code) || !code.StartsWith(InviteCode.Prefix, StringComparison.Ordinal))
+            // ---------- 2. 房主设置 + 邀请码（令牌制：改密码后旧码仍有效） ----------
+            var hs = await host.GetHostSettingsAsync();
+            if (!hs.Ok || hs.Settings == null)
             {
-                Fail("未能生成邀请码");
+                Fail("房主拉取房间设置失败：" + hs.Message);
             }
             else
             {
-                if (code.Contains("pw123", StringComparison.Ordinal)) Fail("邀请码里出现了房间密码明文");
-                else Pass("生成邀请码（密文，不含密码明文）");
+                Pass($"房主拉取设置：人数上限 {hs.Settings.MaxPlayers}（允许 {hs.Settings.MinPlayers}-{hs.Settings.MaxPlayersLimit}）、加密={hs.Settings.HasPassword}");
 
-                if (!GameClient.TryParseInvite(code, out var invite, out var inviteError) || invite == null)
+                var token = hs.Settings.InviteToken;
+                var code = host.CreateInviteCode(token);
+
+                if (string.IsNullOrEmpty(code) || !code.StartsWith(InviteCode.Prefix, StringComparison.Ordinal))
+                {
+                    Fail("未能生成邀请码");
+                }
+                else if (code.Contains("pw123", StringComparison.Ordinal))
+                {
+                    Fail("邀请码里出现了房间密码明文");
+                }
+                else if (!GameClient.TryParseInvite(code, out var invite, out var inviteError) || invite == null)
                 {
                     Fail("邀请码解析失败：" + inviteError);
                 }
-                else if (invite.RoomId != roomId || invite.Password != "pw123"
+                else if (invite.RoomId != roomId || invite.InviteToken != token
                          || !string.Equals(invite.Url, url, StringComparison.OrdinalIgnoreCase))
                 {
-                    Fail($"邀请码内容不符：room={invite.RoomId} pwd={invite.Password} url={invite.Url}");
+                    Fail($"邀请码内容不符：room={invite.RoomId} token={(invite.InviteToken == token ? "ok" : "bad")} url={invite.Url}");
                 }
                 else
                 {
-                    Pass("邀请码还原出正确的服务器地址 / 房间号 / 房间密码");
+                    Pass("邀请码还原出正确的服务器地址 / 房间号 / 邀请令牌（不含密码）");
+
+                    // ★ 关键需求：房主修改密码后，先前发出的邀请码必须仍然有效。
+                    var changed = await host.UpdateRoomSettingsAsync(null, "brand-new-pwd", false);
+                    if (changed.Ok) Pass("房主已修改房间密码");
+                    else Fail("房主改密码失败：" + changed.Message);
 
                     var viaInvite = await dave.JoinByInviteAsync(invite);
                     if (viaInvite.Ok && viaInvite.RoomId == roomId)
-                        Pass($"新客户端凭邀请码直接进房（未手输密码）：{roomId}");
+                        Pass("改密码后旧邀请码依然能进房（邀请令牌与密码解耦）");
                     else
-                        Fail("凭邀请码进房失败：" + viaInvite.Message);
+                        Fail("改密码后旧邀请码失效了：" + viaInvite.Message);
+
+                    // 反面：不带令牌时，旧密码必须被拒、新密码必须通过。
+                    var eve = await NewClientAsync("eve_x");
+                    if (eve != null)
+                    {
+                        var wrong = await eve.JoinRoomAsync(roomId, "pw123");
+                        if (!wrong.Ok) Pass("不带令牌用旧密码进房被拒：" + wrong.Message);
+                        else Fail("旧密码竟然还能进房");
+
+                        var right = await eve.JoinRoomAsync(roomId, "brand-new-pwd");
+                        if (right.Ok) Pass("不带令牌用新密码可以正常进房");
+                        else Fail("新密码加入失败：" + right.Message);
+
+                        await eve.LeaveRoomAsync();
+                    }
+
+                    // 重置邀请令牌 → 旧邀请码立即失效（房主主动作废的唯一方式）。
+                    var rotated = await host.ResetInviteAsync();
+                    if (rotated.Ok && rotated.Settings != null) Pass("房主重置邀请令牌成功");
+                    else Fail("重置邀请令牌失败：" + rotated.Message);
+
+                    var frank = await NewClientAsync("frank_x");
+                    if (frank != null)
+                    {
+                        var expired = await frank.JoinByInviteAsync(invite);
+                        if (!expired.Ok) Pass("重置后旧邀请码立即失效：" + expired.Message);
+                        else Fail("重置后旧邀请码竟然还能进房");
+                    }
                 }
             }
 

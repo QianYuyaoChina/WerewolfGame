@@ -17,6 +17,7 @@ namespace ClientGUI;
 public partial class MainWindow : Window
 {
     private readonly GameViewModel _vm;
+    private readonly GameClient _session;
 
     /// <summary>是否为“主动退出房间”导致的关闭（区别于直接关窗退出程序）。</summary>
     public bool IsLoggedOut { get; private set; }
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        _session = session;
         _vm = new GameViewModel(session);
         DataContext = _vm;
 
@@ -153,12 +155,12 @@ public partial class MainWindow : Window
     /// </summary>
     private void Menu_Invite_OnClick(object sender, RoutedEventArgs e) => ShowInviteCode();
 
-    private void ShowInviteCode()
+    private async void ShowInviteCode()
     {
-        var code = _vm.GenerateInviteCode();
-        if (string.IsNullOrEmpty(code))
+        var (ok, code, message) = await _vm.GenerateInviteCodeAsync();
+        if (!ok || code.Length == 0)
         {
-            MessageBox.Show("请先加入或创建一个房间，再生成邀请码。", "邀请码",
+            MessageBox.Show(string.IsNullOrEmpty(message) ? "无法生成邀请码。" : message, "邀请码",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -180,6 +182,19 @@ public partial class MainWindow : Window
 
     /// <summary>打开设置窗口（外观主题 / 主界面视图 / 上次使用信息）。</summary>
     private void Menu_Settings_OnClick(object sender, RoutedEventArgs e) => SettingsWindow.Open(this);
+
+    /// <summary>打开房主设置窗口（最大人数 / 密码 / 身份配置 / 邀请码）。仅房主可用。</summary>
+    private void Menu_HostSettings_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!_vm.IsHost)
+        {
+            MessageBox.Show("只有房主可以修改房间设置。", "房主设置",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        new HostSettingsWindow(_session) { Owner = this }.ShowDialog();
+    }
 
     /// <summary>
     /// 设置窗口里改动了三栏显隐 → 把菜单勾选与布局同步过来

@@ -25,6 +25,10 @@ public sealed class WerewolfPlayer
 
     // ---- 夜间行动 ----
     public int NightTarget { get; set; } = -1;
+
+    /// <summary>第二名目标（仅丘比特用：情侣的另一半）。</summary>
+    public int NightTarget2 { get; set; } = -1;
+
     public string? NightActionType { get; set; }
     public bool NightActionSubmitted { get; set; }
 
@@ -36,8 +40,25 @@ public sealed class WerewolfPlayer
     public bool HunterCanShoot { get; set; }
     public bool HunterShotSubmitted { get; set; }
 
+    // ---- 丘比特（情侣关系，双向记录） ----
+    /// <summary>情侣另一方的用户名；不是情侣时为 null。</summary>
+    public string? LoverUsername { get; set; }
+
+    // ---- 警长 ----
+    /// <summary>是否持有警徽（本局配置了警长身份且未被淘汰时才可能为 true）。</summary>
+    public bool HasBadge { get; set; }
+
+    /// <summary>警徽移交给谁（-1 表示未选/放弃）。</summary>
+    public int SheriffTransferTarget { get; set; } = -1;
+
+    /// <summary>警徽移交是否已提交。</summary>
+    public bool SheriffTransferSubmitted { get; set; }
+
     /// <summary>是否为狼人阵营。</summary>
     public bool IsWolf => Role == Role.Werewolf;
+
+    /// <summary>是否为情侣。</summary>
+    public bool IsLover => !string.IsNullOrEmpty(LoverUsername);
 
     // ---- 平台字段便捷透传 ----
     public string Username => Player.Username;

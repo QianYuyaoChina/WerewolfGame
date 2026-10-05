@@ -122,10 +122,12 @@ public sealed class RoomManager
 
     /// <summary>
     /// 按房间号加入。加密房间校验密码；命中「本房玩家」视为重连并跳过密码校验。
+    /// 若携带**有效邀请令牌**（来自邀请码）同样跳过密码校验——因此房主改密码后，
+    /// 先前发出的邀请码依然有效。
     /// 返回 (成功, 提示, 房间号, 是否重连)。
     /// </summary>
     public (bool ok, string msg, string roomId, bool reconnected)
-        JoinRoom(string roomId, string connId, string? password)
+        JoinRoom(string roomId, string connId, string? password, string? inviteToken = null)
     {
         var username = GetUsername(connId);
         if (string.IsNullOrEmpty(username)) return (false, ServerMessages.NotLoggedIn, "", false);
@@ -135,7 +137,8 @@ public sealed class RoomManager
 
         // 命中本房玩家即视为重连，跳过密码校验（客户端仍会带上内存中的密码）。
         var alreadyMember = room.GetPlayerByName(username) != null;
-        if (!alreadyMember && !room.VerifyPassword(password))
+        var byInvite = room.VerifyInviteToken(inviteToken);
+        if (!alreadyMember && !byInvite && !room.VerifyPassword(password))
             return (false, ServerMessages.WrongPassword, "", false);
 
         var (ok, msg, _, reconnected) = room.AddOrReconnect(username, connId);
@@ -147,6 +150,29 @@ public sealed class RoomManager
         _connRoom[connId] = roomId;
         room.TouchOccupancy();
         return (true, reconnected ? "reconnected" : "joined", roomId, reconnected);
+    }
+
+    /// <summary>房主修改房间设置（最大人数 / 密码 / 游戏私有配置）。返回 (成功, 提示)。</summary>
+    public (bool ok, string msg) UpdateSettings(string connId, int? maxPlayers, string? newPassword,
+                                                bool clearPassword, string? gameSettingsJson)
+    {
+        var room = GetRoomByConnection(connId);
+        if (room == null) return (false, ServerMessages.NotInRoom);
+
+        return room.UpdateSettings(connId, maxPlayers, newPassword, clearPassword, gameSettingsJson);
+    }
+
+    /// <summary>房主作废并重新生成邀请令牌（旧的邀请码立即失效）。返回 (成功, 提示, 房间)。</summary>
+    public (bool ok, string msg, GameRoom? room) RotateInvite(string connId)
+    {
+        var room = GetRoomByConnection(connId);
+        if (room == null) return (false, ServerMessages.NotInRoom, null);
+
+        var me = room.GetPlayer(connId);
+        if (me == null || !me.IsHost) return (false, ServerMessages.OnlyHostCanEdit, null);
+
+        room.RotateInviteToken();
+        return (true, "", room);
     }
 
     /// <summary>

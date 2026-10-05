@@ -49,6 +49,7 @@ public static class UiSmokeCheck
                 Try("KeepRoomWindow", () => new KeepRoomWindow());
                 Try("InviteCodeWindow", () => new InviteCodeWindow("WW1:TEST-CODE"));
                 Try("SettingsWindow", () => new SettingsWindow());
+                Try("HostSettingsWindow", () => new HostSettingsWindow(new GameClient()));
 
                 // 游戏操作面板插槽：XAML 能独立解析（DataTemplate 装载目标）。
                 TryElement("WerewolfPanel", () => new WerewolfPanel());

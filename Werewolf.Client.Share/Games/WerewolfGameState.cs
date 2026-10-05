@@ -24,4 +24,24 @@ public sealed class WerewolfGameState
 
     /// <summary>本局生效的规则（时长 / 夜晚顺序 / 人数上下限）；可为 null。</summary>
     public GameRules? Rules { get; set; }
+
+    // ---------------- 身份布局与新身份（v2.1） ----------------
+
+    /// <summary>本局最终身份配置的展示文案，如「🐺 狼人×2、🔮 预言家×1、👤 平民×2」。</summary>
+    public string RoleSummary { get; set; } = "";
+
+    /// <summary>本局的警长玩家名；未配置警长或警徽已作废时为空。</summary>
+    public string SheriffName { get; set; } = "";
+
+    /// <summary>「你」的情侣玩家名（丘比特指定）；你不是情侣时为空。</summary>
+    public string LoverName { get; set; } = "";
+
+    /// <summary>「你」是否是丘比特指定的情侣之一。</summary>
+    public bool IsLover { get; set; }
+
+    /// <summary>本局是否配置了警长身份（用于界面决定是否显示警徽相关提示）。</summary>
+    public bool SheriffEnabled { get; set; }
+
+    /// <summary>当前是否由「我」移交警徽（我是被淘汰的警长，且正处于警徽移交阶段）。</summary>
+    public bool YouTransferBadge { get; set; }
 }

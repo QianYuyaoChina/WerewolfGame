@@ -26,6 +26,17 @@ public static class Ops
     /// <summary>查询服务器上的房间列表（只读）。</summary>
     public const string RoomList = "roomlist";
 
+    // ---------------- 房主设置（v2.1） ----------------
+
+    /// <summary>房主拉取本房间的设置（最大人数 / 是否加密 / 邀请令牌 / 身份布局）。仅房主可用。</summary>
+    public const string HostSettings = "hostsettings";
+
+    /// <summary>房主修改房间设置（最大人数 / 密码 / 身份布局）。仅房主可用。</summary>
+    public const string RoomSettings = "roomsettings";
+
+    /// <summary>房主作废并重新生成邀请令牌（旧的邀请码随即失效）。</summary>
+    public const string ResetInvite = "resetinvite";
+
     /// <summary>创建房间并成为房主。</summary>
     public const string CreateRoom = "createroom";
 
@@ -74,6 +85,17 @@ public static class ServerMessages
 
     /// <summary>gamelist 不可用（理论不出现，兜底）。</summary>
     public const string GameListFailed = "无法获取游戏列表";
+
+    // ---------------- 房主设置（v2.1） ----------------
+
+    /// <summary>非房主尝试修改房间设置。</summary>
+    public const string OnlyHostCanEdit = "只有房主可以修改房间设置";
+
+    /// <summary>游戏进行中不允许修改该设置（人数 / 身份布局）。</summary>
+    public const string SettingLockedInGame = "游戏进行中，无法修改该设置";
+
+    /// <summary>邀请令牌无效（邀请码已失效或被重置）。</summary>
+    public const string InviteExpired = "邀请码已失效，请向房主要一个新的";
 
     public static string RoomFull(int max) => $"房间已满（最多 {max} 人）";
 }
@@ -187,6 +209,76 @@ public sealed class JoinRoomPayload
 {
     public string RoomId { get; set; } = "";
     public string? Password { get; set; }
+
+    /// <summary>
+    /// 邀请令牌（来自邀请码）。令牌匹配时**跳过密码校验**，
+    /// 这样房主即使改了房间密码，先前发出的邀请码依然有效。
+    /// </summary>
+    public string? InviteToken { get; set; }
+}
+
+// ---------------- 房主设置（v2.1） ----------------
+
+/// <summary>房主视角的房间设置（含邀请令牌，因此**只发给房主**）。</summary>
+public sealed class HostSettingsDto
+{
+    public string RoomId { get; set; } = "";
+    public string RoomName { get; set; } = "";
+
+    /// <summary>房间当前的最大人数（可能是房主设过的覆盖值）。</summary>
+    public int MaxPlayers { get; set; }
+
+    /// <summary>游戏允许的最小人数（下限，房主不能改到它以下）。</summary>
+    public int MinPlayers { get; set; }
+
+    /// <summary>游戏允许的最大人数（上限，房主不能改到它以上）。</summary>
+    public int MaxPlayersLimit { get; set; }
+
+    public bool HasPassword { get; set; }
+
+    /// <summary>本房间的邀请令牌：房间生命周期内稳定，改密码 / 改人数都不会变。</summary>
+    public string InviteToken { get; set; } = "";
+
+    /// <summary>是否已开局（开局后人数与身份布局不可改）。</summary>
+    public bool Running { get; set; }
+
+    /// <summary>当前参与人数（用于校验身份布局）。</summary>
+    public int PlayerCount { get; set; }
+
+    /// <summary>当前游戏私有配置的原始 JSON（未自定义时为空）。由各游戏的「设置」界面解析。</summary>
+    public string? GameSettingsJson { get; set; }
+
+    /// <summary>游戏私有配置是否为房主自定义（false 表示跟随游戏的默认配置）。</summary>
+    public bool CustomGameSettings { get; set; }
+}
+
+/// <summary>房主修改房间设置。只需要传要改的字段（null 表示不动）。</summary>
+public sealed class UpdateRoomSettingsPayload
+{
+    /// <summary>新的最大人数；null 表示不改。</summary>
+    public int? MaxPlayers { get; set; }
+
+    /// <summary>新的房间密码；null 表示不改。</summary>
+    public string? NewPassword { get; set; }
+
+    /// <summary>true 表示改成公开房间（忽略 NewPassword）。</summary>
+    public bool ClearPassword { get; set; }
+
+    /// <summary>
+    /// 本游戏的私有配置（不透明 JSON 字符串，由游戏自己解释；狼人杀放的是身份布局）。
+    /// null 表示不改、空字符串表示恢复默认、其他值原样保存。
+    /// </summary>
+    public string? GameSettingsJson { get; set; }
+}
+
+/// <summary>丘比特第一夜指定两名玩家成为情侣。</summary>
+public sealed class CupidPayload
+{
+    /// <summary>情侣中的第一位玩家编号。</summary>
+    public int TargetA { get; set; }
+
+    /// <summary>情侣中的第二位玩家编号。</summary>
+    public int TargetB { get; set; }
 }
 
 /// <summary>

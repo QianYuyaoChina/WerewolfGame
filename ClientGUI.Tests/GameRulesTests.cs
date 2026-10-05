@@ -83,18 +83,18 @@ public static class GameRulesTests
     private static void NightOrderNormalization()
     {
         Check.SequenceEqual(
-            new[] { Role.Guard, Role.Werewolf, Role.Witch, Role.Seer },
+            new[] { Role.Cupid, Role.Guard, Role.Werewolf, Role.Witch, Role.Seer },
             RoleInfo.ResolveNightOrder(null),
-            "夜晚顺序：空配置回退默认顺序");
+            "夜晚顺序：空配置回退默认顺序（丘比特 → 守卫 → 狼人 → 女巫 → 预言家）");
 
         Check.SequenceEqual(
-            new[] { Role.Werewolf, Role.Guard, Role.Witch, Role.Seer },
+            new[] { Role.Werewolf, Role.Guard, Role.Cupid, Role.Witch, Role.Seer },
             RoleInfo.ResolveNightOrder(new[] { "狼人", "守卫" }),
             "夜晚顺序：按配置排序并把缺失角色补到末尾");
 
         // 重复项与无法识别的名称都要被过滤，且不影响补齐。
         Check.SequenceEqual(
-            new[] { Role.Witch, Role.Guard, Role.Werewolf, Role.Seer },
+            new[] { Role.Witch, Role.Cupid, Role.Guard, Role.Werewolf, Role.Seer },
             RoleInfo.ResolveNightOrder(new[] { "女巫", "女巫", "不存在" }),
             "夜晚顺序：过滤重复与未知角色后补齐标准角色");
 
@@ -105,9 +105,9 @@ public static class GameRulesTests
         var bound = new GameRules();
         bound.NightOrder.AddRange(new[] { "狼人", "守卫", "女巫", "预言家" });
         Check.SequenceEqual(
-            new[] { Role.Werewolf, Role.Guard, Role.Witch, Role.Seer },
+            new[] { Role.Werewolf, Role.Guard, Role.Witch, Role.Seer, Role.Cupid },
             RoleInfo.ResolveNightOrder(bound.NightOrder),
-            "夜晚顺序：绑定后的顺序以配置为准（狼人先行动）");
+            "夜晚顺序：绑定后的顺序以配置为准（狼人先行动，丘比特补到末尾）");
     }
 
     // ==================== 界面状态持久化 ====================

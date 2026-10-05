@@ -42,6 +42,16 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
     private string _actionHint = "";
     private string _countdownText = "";
 
+    // ---- v2.1：身份配置 / 情侣 / 警长 ----
+    private string _roleSummary = "";
+    private string _loverName = "";
+    private bool _isLover;
+    private string _sheriffName = "";
+    private bool _sheriffEnabled;
+    private bool _youTransferBadge;
+    private int _cupidTargetA = -1;
+    private int _cupidTargetB = -1;
+
     public WerewolfViewModel(GameClient client, IGameHostBridge bridge)
     {
         _client = client;
@@ -54,7 +64,12 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
             UseHeal = new AsyncRelayCommand(_ => UseHealAsync()),
             SkipPotion = new AsyncRelayCommand(_ => SkipPotionAsync()),
             AbstainVote = new AsyncRelayCommand(_ => AbstainVoteAsync()),
-            SkipHunterShot = new AsyncRelayCommand(_ => SkipHunterShotAsync())
+            SkipHunterShot = new AsyncRelayCommand(_ => SkipHunterShotAsync()),
+            SetCupidA = new RelayCommand(_ => SetCupidTarget(lover1: true)),
+            SetCupidB = new RelayCommand(_ => SetCupidTarget(lover1: false)),
+            ConfirmCupid = new AsyncRelayCommand(_ => ConfirmCupidAsync()),
+            TransferBadge = new AsyncRelayCommand(_ => TransferBadgeAsync(_bridge.SelectedTargetId)),
+            VoidBadge = new AsyncRelayCommand(_ => TransferBadgeAsync(-1))
         };
         _actionFactory = new WerewolfActionFactory(_commands);
 
@@ -91,12 +106,13 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
         {
             Phases.Night => IsMyTurn && _yourRole switch
             {
-                Roles.Guard or Roles.Werewolf or Roles.Seer => true,
+                Roles.Guard or Roles.Werewolf or Roles.Seer or Roles.Cupid => true,
                 Roles.Witch => !_potionsUsed.Contains("poison") && !_usedThisRound.Contains("poison"),
                 _ => false
             },
             Phases.Vote => true,
             Phases.HunterShoot => true,
+            Phases.SheriffTransfer => _youTransferBadge,
             _ => false
         };
     }
@@ -122,6 +138,21 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
         _isAlive = state.IsAlive;
         _isJoined = !string.IsNullOrEmpty(state.RoomId);
         _ownName = state.Players.FirstOrDefault(p => p.IsYou)?.Name ?? "";
+
+        // ---- v2.1：身份配置 / 情侣 / 警长 ----
+        _roleSummary = _payload?.RoleSummary ?? "";
+        _loverName = _payload?.LoverName ?? "";
+        _isLover = _payload?.IsLover ?? false;
+        _sheriffName = _payload?.SheriffName ?? "";
+        _sheriffEnabled = _payload?.SheriffEnabled ?? false;
+        _youTransferBadge = _payload?.YouTransferBadge ?? false;
+
+        // 离开夜晚就清掉丘比特的临时选择（避免下一夜残留）。
+        if (_phase != Phases.Night)
+        {
+            _cupidTargetA = -1;
+            _cupidTargetB = -1;
+        }
 
         var roundKey = (_day, _phase);
         var newRound = roundKey != _roundKey;
@@ -171,6 +202,14 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
         _isAlive = true;
         _isJoined = false;
         _ownName = "";
+        _roleSummary = "";
+        _loverName = "";
+        _isLover = false;
+        _sheriffName = "";
+        _sheriffEnabled = false;
+        _youTransferBadge = false;
+        _cupidTargetA = -1;
+        _cupidTargetB = -1;
         _countdown.Stop();
 
         Actions.Clear();
@@ -210,6 +249,21 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
 
     public int MinPlayers => _rules?.MinPlayers ?? 4;
     public int PlayerCount => _bridge.PlayerCount;
+
+    // ---- v2.1：身份配置 / 情侣 / 警长（供面板展示） ----
+
+    /// <summary>本局最终身份配置的展示文案（服务端下发）。</summary>
+    public string RoleSummary => _roleSummary;
+    public bool HasRoleSummary => _roleSummary.Length > 0;
+
+    /// <summary>我是否是情侣，以及另一半是谁。</summary>
+    public bool IsLover => _isLover;
+    public string LoverName => _loverName;
+    public string LoverText => _isLover && _loverName.Length > 0 ? $"💘 你的情侣：{_loverName}（一方出局另一方殉情）" : "";
+
+    /// <summary>当前警长与是否配置了警长。</summary>
+    public bool SheriffEnabled => _sheriffEnabled;
+    public string SheriffText => _sheriffName.Length > 0 ? $"🎖 当前警长：{_sheriffName}" : SheriffEnabled ? "🎖 警徽已作废" : "";
 
     public bool CanStartGame => IsHost && IsWaiting && PlayerCount >= MinPlayers;
     public string StartHint => IsHost
@@ -266,14 +320,18 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
             UsedThisRound = _usedThisRound,
             PotionsUsed = _potionsUsed,
             ActingRole = _actingRole,
-            IsMyTurn = IsMyTurn
+            IsMyTurn = IsMyTurn,
+            CupidTargetA = _cupidTargetA,
+            CupidTargetB = _cupidTargetB,
+            IsSheriffTransferor = _youTransferBadge && _phase == Phases.SheriffTransfer
         };
     }
 
     private bool CanSelectTargets =>
         (_isAlive && _phase == Phases.Vote)
         || (_isAlive && _phase == Phases.Night && IsMyTurn)
-        || _phase == Phases.HunterShoot;
+        || _phase == Phases.HunterShoot
+        || (_phase == Phases.SheriffTransfer && _youTransferBadge);
 
     private void RefreshChips()
     {
@@ -284,6 +342,10 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
         Chips.Add(new StatusChip { Text = PhaseDisplay, ColorHex = Phases.Accent(_phase) });
         if (CountdownText.Length > 0)
             Chips.Add(new StatusChip { Text = CountdownText, ColorHex = "#FFCE6B" });
+        if (_sheriffEnabled && _sheriffName.Length > 0)
+            Chips.Add(new StatusChip { Text = $"🎖 警长：{_sheriffName}", ColorHex = "#FFD75E" });
+        if (_isLover && _loverName.Length > 0)
+            Chips.Add(new StatusChip { Text = $"💘 情侣：{_loverName}", ColorHex = "#FF7FB0" });
     }
 
     private void RaiseDisplayChanged()
@@ -311,6 +373,13 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
         OnPropertyChanged(nameof(CanStartGame));
         OnPropertyChanged(nameof(StartHint));
         OnPropertyChanged(nameof(ShowStartHint));
+        OnPropertyChanged(nameof(RoleSummary));
+        OnPropertyChanged(nameof(HasRoleSummary));
+        OnPropertyChanged(nameof(IsLover));
+        OnPropertyChanged(nameof(LoverName));
+        OnPropertyChanged(nameof(LoverText));
+        OnPropertyChanged(nameof(SheriffEnabled));
+        OnPropertyChanged(nameof(SheriffText));
     }
 
     private void OnCountdownChanged(string text)
@@ -377,6 +446,67 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
                 }
                 _ = HunterShotAsync(_bridge.SelectedTargetId);
                 break;
+
+            case Phases.SheriffTransfer:
+                if (_bridge.SelectedTargetId < 0)
+                {
+                    ActionHint = "请先选择接手的玩家，或点击【作废警徽】。";
+                    return;
+                }
+                _ = TransferBadgeAsync(_bridge.SelectedTargetId);
+                break;
+        }
+    }
+
+    /// <summary>丘比特：把当前选中的玩家记为情侣①或②（本地暂存，最后一次性提交）。</summary>
+    private void SetCupidTarget(bool lover1)
+    {
+        var id = _bridge.SelectedTargetId;
+        if (id < 0) { ActionHint = "请先在左侧选择一名玩家。"; return; }
+
+        if (lover1) _cupidTargetA = id;
+        else if (id == _cupidTargetA) { ActionHint = "情侣必须是两名不同的玩家。"; return; }
+        else _cupidTargetB = id;
+
+        Refresh();
+    }
+
+    private async Task ConfirmCupidAsync()
+    {
+        if (_cupidTargetA < 0 || _cupidTargetB < 0)
+        {
+            ActionHint = "请先分别记下两名情侣。";
+            return;
+        }
+
+        try
+        {
+            await _client.CallGameOpAsync(WerewolfOps.Cupid,
+                JsonSerializer.SerializeToNode(new CupidPayload { TargetA = _cupidTargetA, TargetB = _cupidTargetB }, Json));
+            _usedThisRound.Add("cupid");
+            _bridge.AppendLog($"✅ 已指定情侣：[{_cupidTargetA}] 与 [{_cupidTargetB}] 成为情侣。");
+            Refresh();
+        }
+        catch (Exception ex)
+        {
+            _bridge.AppendLog("⚠️ " + ex.Message, LogKinds.Error);
+        }
+    }
+
+    /// <summary>警长移交警徽；<paramref name="targetId"/> 为 -1 表示作废警徽。</summary>
+    private async Task TransferBadgeAsync(int targetId)
+    {
+        try
+        {
+            await _client.CallGameOpAsync(WerewolfOps.Sheriff,
+                JsonSerializer.SerializeToNode(new TargetPayload { TargetId = targetId }, Json));
+            _usedThisRound.Add("sheriff");
+            _bridge.AppendLog(targetId < 0 ? "✅ 已作废警徽。" : $"✅ 已把警徽移交给 [{targetId}]。");
+            Refresh();
+        }
+        catch (Exception ex)
+        {
+            _bridge.AppendLog("⚠️ " + ex.Message, LogKinds.Error);
         }
     }
 

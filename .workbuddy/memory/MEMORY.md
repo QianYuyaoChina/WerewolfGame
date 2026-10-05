@@ -34,8 +34,17 @@
   只靠推送会出现「玩家列表空白、房主标识丢失」的空白界面。`GameClient.LastState` 缓存最近一份状态供即时回填。
 - `gamelist`（`Ops.GameList`）：查询「服务器当前可用游戏」（`GameListResult`），创建房间下拉与图鉴共用。
 - **`GameStateDto` 是「通用信封 + 游戏私有负载」**：通用字段只有 `GameId/RoomId/RoomName/HostName/Running/Status/YourId/IsAlive/Players`，
-  玩法字段一律进 `JsonNode? GamePayload`（狼人杀 = `WerewolfGameState{Phase,Day,YourRole,YourRoleDesc,ActingRole,Rules}`）。
+  玩法字段一律进 `JsonNode? GamePayload`（狼人杀 = `WerewolfGameState`）。
   `PlayerDto.Tag/TagColor` 是游戏自定义标签（狼人杀 = 身份中文名 + 旧 RoleBrush 的 hex，用于保持观感）。
+- **房主设置（v2.1）**：op `hostsettings`（房主拉设置，含**邀请令牌**）/ `roomsettings`（改人数/密码/游戏私有配置）/ `resetinvite`。
+  平台只把「游戏私有配置」当**不透明 JSON 字符串**存（`IGameContext.GameSettingsJson`），由游戏自己解释（狼人杀 = `RoleLayout`）。
+  `IGameContext.MaxPlayers` 是房间**实际**上限（房主可在游戏上限内调小），房间加入门禁与游戏开局校验都用它。
+- **邀请码 = 邀请令牌，不是密码**（v2.1 起）：`InvitePayload{Url,RoomId,InviteToken?,RoomName?}`；
+  `GameRoom._inviteToken` 房间生命周期内稳定 → **房主改密码后旧邀请码仍有效**；只有 `RotateInviteToken()`（房主显式重置）才作废。
+  `joinroom` 带 `InviteToken` 且匹配时**跳过密码校验**。客户端断线重连优先用内存里的令牌（密码可能已被房主改掉）。
+- **身份布局 `RoleLayout`（v2.1）**：`Dictionary<string,int>`（键用 `Roles.*` 中文名），
+  `Default(n)` 必须与旧内置比例**逐人一致**（零回归的保证）；`ValidateForGame(n)` 做严格校验
+  （总数 == 人数、狼≥1、狼<好人）；`Describe()` 供开局公布。**开局前必须重新读一次布局**（房主可能在建房后才设置）。
 - **op 路由**：框架只认识 `join/roomlist/gamelist/createroom/joinroom/leaveroom/roomstate/start/chat/ping`；
   其余 op（`night/vote/hunter` 等）走 `DispatchAsync` 的 **default 分支**透传给当前游戏实例，**框架不认识任何具体游戏的 op**。
 - **邀请码** = `Werewolf.Client.Share/InviteCode.cs`：`WW1:` + Base64Url(AES-GCM 信封)，
@@ -74,6 +83,7 @@
   - `--hostinvite <url>` → 房主交接 / 保留房间 / 邀请码免密进房
   - `--reconnect <url> [秒]` → 断线重连
   - `--protocol <url>` → 协议边界（未知 GameId / 视角隔离 / 等待中不泄露身份 / 夜间顺序门禁）
+  - `--newroles <url>` → 新身份端到端（自定义布局 / 开局公布 / 警长公开 / 丘比特牵线 / 情侣殉情，**需小局临时配置**）
   - `--hold` / `--bots` → 凑人数 / 机器人自动对局
   - 默认模式还含：`FakeGameProbe`（工程师的假游戏）与 `IndependentGameProbe`（QA 自写的第三个游戏）——**扩展性回归**
 

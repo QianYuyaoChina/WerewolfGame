@@ -342,14 +342,18 @@ public static class RoomTests
 
     // ==================== 邀请码 ====================
 
-    /// <summary>邀请码：加密封装「服务器地址 + 房间号 + 密码」，且不泄露明文。</summary>
+    /// <summary>
+    /// 邀请码：加密封装「服务器地址 + 房间号 + 邀请令牌」，且不泄露明文。
+    /// 注意放的是**令牌不是密码**——房主改密码后旧邀请码依然有效。
+    /// </summary>
     private static void InviteCodeTests()
     {
         const string url = "http://192.168.1.8:5000/gamehub";
+        const string token = "dG9rZW4tQUJDMTIz";
 
-        var code = InviteCode.Create(url, "ABCDE", "s3cret", "新手房");
+        var code = InviteCode.Create(url, "ABCDE", token, "新手房");
         Check.True(code.StartsWith(InviteCode.Prefix, StringComparison.Ordinal), "邀请码：带 WW1: 前缀");
-        Check.False(code.Contains("s3cret", StringComparison.Ordinal), "邀请码：不含房间密码明文");
+        Check.False(code.Contains(token, StringComparison.Ordinal), "邀请码：不含邀请令牌明文");
         Check.False(code.Contains("ABCDE", StringComparison.Ordinal), "邀请码：不含房间号明文");
         Check.False(code.Contains("192.168", StringComparison.Ordinal), "邀请码：不含服务器地址明文");
         Check.True(InviteCode.LooksLikeCode(code), "邀请码：LooksLikeCode 可识别");
@@ -358,22 +362,22 @@ public static class RoomTests
         Check.True(InviteCode.TryParse(code, out var parsed, out var error), "邀请码：可解析（" + error + "）");
         Check.Equal(url, parsed!.Url, "邀请码：服务器地址还原");
         Check.Equal("ABCDE", parsed.RoomId, "邀请码：房间号还原");
-        Check.Equal("s3cret", parsed.Password, "邀请码：房间密码还原");
+        Check.Equal(token, parsed.InviteToken, "邀请码：邀请令牌还原");
         Check.Equal("新手房", parsed.RoomName, "邀请码：房间名还原");
-        Check.True(parsed.HasPassword, "邀请码：标记含密码");
+        Check.True(parsed.HasToken, "邀请码：标记含邀请令牌");
 
         // 随机 nonce：同一房间两次生成密文不同，但都能解出同样内容。
-        var code2 = InviteCode.Create(url, "ABCDE", "s3cret", "新手房");
+        var code2 = InviteCode.Create(url, "ABCDE", token, "新手房");
         Check.NotEqual(code, code2, "邀请码：两次生成密文不同");
         Check.True(InviteCode.TryParse(code2, out var parsed2, out _) && parsed2!.RoomId == "ABCDE",
             "邀请码：同一房间的多个码都可解析");
 
-        // 公开房间：不带密码。
-        var openCode = InviteCode.Create(url, "FGHJK", null, null);
-        Check.True(InviteCode.TryParse(openCode, out var open, out _), "邀请码：公开房间码可解析");
-        Check.False(open!.HasPassword, "邀请码：公开房间不带密码");
-        Check.True(open.Password == null, "邀请码：公开房间密码为 null");
-        Check.True(open.RoomName == null, "邀请码：未提供房间名时为 null");
+        // 没有令牌（例如旧版本客户端造出来的码）也能解析，只是进加密房时会被要求输密码。
+        var tokenless = InviteCode.Create(url, "FGHJK", null, null);
+        Check.True(InviteCode.TryParse(tokenless, out var none, out _), "邀请码：无令牌的码仍可解析");
+        Check.False(none!.HasToken, "邀请码：无令牌时 HasToken=false");
+        Check.True(none.InviteToken == null, "邀请码：无令牌时为 null");
+        Check.True(none.RoomName == null, "邀请码：未提供房间名时为 null");
 
         // 篡改与非法输入。
         var tampered = code[..^2] + (code[^1] == 'A' ? "BB" : "AA");

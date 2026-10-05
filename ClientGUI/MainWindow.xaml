@@ -53,6 +53,8 @@
                     <MenuItem Header="生成邀请码" InputGestureText="Ctrl+I"
                               Click="Menu_Invite_OnClick"
                               IsEnabled="{Binding HasRoomInfo}" />
+                    <MenuItem Header="房主设置…" Click="Menu_HostSettings_OnClick"
+                              IsEnabled="{Binding IsHost}" />
                     <Separator Style="{StaticResource MenuSeparator}" />
                     <MenuItem Header="退出房间" Command="{Binding DisconnectCommand}"
                               IsEnabled="{Binding CanLeaveRoom}" />

@@ -360,7 +360,10 @@ class Program
         }
         if (line.StartsWith("chat ", StringComparison.OrdinalIgnoreCase))
         {
-            await _client.ChatAsync(line[5..]);
+            // 用带回执的调用：轮流发言的玩法会在服务端拒绝插话，这里要把原因打出来。
+            var r = await _client.CallGameOpAsync(Ops.Chat,
+                System.Text.Json.JsonSerializer.SerializeToNode(new ChatPayload { Text = line[5..] }));
+            if (!r.ok) Print("⚠️ " + r.msg);
             return;
         }
         if (line.Equals("invite", StringComparison.OrdinalIgnoreCase))

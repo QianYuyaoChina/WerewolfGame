@@ -53,12 +53,14 @@ public static class UiSmokeCheck
 
                 // 游戏操作面板插槽：XAML 能独立解析（DataTemplate 装载目标）。
                 TryElement("WerewolfPanel", () => new WerewolfPanel());
+                TryElement("UndercoverPanel", () => new UndercoverPanel());
                 TryElement("UnknownGamePanel", () => new UnknownGamePanel());
 
                 ExerciseMainWindow();
 
                 CheckSettingsWindow();
                 CheckHostSettingsPollKeepsEdits();
+            CheckHostSettingsGameTabs();
                 CheckCreateRoomGamePicker();
                 CheckTheme();
                 CheckClipboard();
@@ -328,6 +330,76 @@ public static class UiSmokeCheck
             Check.Equal("9", maxInput.Text, "UI：轮询不覆盖正在编辑的最大人数（回归：曾自动跳回旧值）");
             Check.Equal("my-new-pwd", pwdInput.Password, "UI：轮询不覆盖正在输入的密码");
             Check.False(autoBox.IsChecked == true, "UI：轮询不覆盖「跟随人数自动配置」的勾选状态");
+        }
+        finally
+        {
+            try { window.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
+        }
+    }
+
+    /// <summary>
+    /// v2.3.1：房主设置要**按房间所属游戏**显示内容 ——
+    /// ① 「身份配置」页只给有身份配置的玩法（狼人杀），谁是卧底不该看到；
+    /// ② 窗口要带游戏标识（图标 / 中文名 / 主题色），不同游戏的房间一眼可辨。
+    /// </summary>
+    private static void CheckHostSettingsGameTabs()
+    {
+        var window = new HostSettingsWindow(new GameClient());
+        try
+        {
+            var layoutTab = window.FindName("LayoutTab") as TabItem;
+            var emojiText = window.FindName("GameEmojiText") as TextBlock;
+            var badge = window.FindName("GameBadge") as Border;
+
+            Check.True(layoutTab != null && emojiText != null && badge != null,
+                "UI：房主设置窗口含「身份配置」页与游戏标识徽标");
+            if (layoutTab == null || emojiText == null || badge == null) return;
+
+            // —— 谁是卧底：没有身份配置 ——
+            window.RefreshFromServerState(new HostSettingsDto
+            {
+                RoomId = "ABCDE",
+                RoomName = "卧底房",
+                MaxPlayers = 8,
+                MinPlayers = 3,
+                MaxPlayersLimit = 12,
+                InviteToken = "token-abc",
+                PlayerCount = 4,
+                GameId = GameIds.Undercover,
+                GameName = "谁是卧底",
+                GameEmoji = "🕵️",
+                GameAccent = "#38C9B0",
+                HasPlayerConfig = false
+            });
+
+            Check.Equal(Visibility.Collapsed, layoutTab.Visibility,
+                "UI：谁是卧底的房主设置隐藏「身份配置」页（不串到狼人杀）");
+            Check.Equal("🕵️", emojiText.Text, "UI：房主设置显示房间所属游戏的图标");
+            Check.True(window.Title.Contains("谁是卧底", StringComparison.Ordinal),
+                "UI：房主设置窗口标题带游戏名（" + window.Title + "）");
+            Check.True(badge.ToolTip is string tip && tip.Contains("谁是卧底", StringComparison.Ordinal),
+                "UI：游戏徽标的 ToolTip 说明本房间的游戏");
+
+            // —— 狼人杀：有身份配置 ——
+            window.RefreshFromServerState(new HostSettingsDto
+            {
+                RoomId = "ABCDE",
+                RoomName = "狼人房",
+                MaxPlayers = 12,
+                MinPlayers = 4,
+                MaxPlayersLimit = 12,
+                InviteToken = "token-abc",
+                PlayerCount = 6,
+                GameId = GameIds.Werewolf,
+                GameName = "狼人杀",
+                GameEmoji = "🐺",
+                GameAccent = "#9B8CFF",
+                HasPlayerConfig = true
+            });
+
+            Check.Equal(Visibility.Visible, layoutTab.Visibility,
+                "UI：狼人杀的房主设置仍然显示「身份配置」页");
+            Check.Equal("🐺", emojiText.Text, "UI：切换到狼人杀房间后徽标同步更新");
         }
         finally
         {

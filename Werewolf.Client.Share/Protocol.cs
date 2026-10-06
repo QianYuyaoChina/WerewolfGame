@@ -86,6 +86,12 @@ public static class ServerMessages
     /// <summary>gamelist 不可用（理论不出现，兜底）。</summary>
     public const string GameListFailed = "无法获取游戏列表";
 
+    /// <summary>出局玩家尝试发言 / 操作。</summary>
+    public const string Dead = "你已出局，无法发言。";
+
+    /// <summary>轮流发言的玩法里，没轮到的玩家抢着发言（v2.3.1）。</summary>
+    public const string NotYourTurn = "还没轮到你发言。";
+
     // ---------------- 房主设置（v2.1） ----------------
 
     /// <summary>非房主尝试修改房间设置。</summary>
@@ -250,6 +256,26 @@ public sealed class HostSettingsDto
 
     /// <summary>游戏私有配置是否为房主自定义（false 表示跟随游戏的默认配置）。</summary>
     public bool CustomGameSettings { get; set; }
+
+    // ---- 游戏身份（v2.3.1）：房主设置按游戏显示不同内容 ----
+
+    /// <summary>本房间绑定的游戏机器名。</summary>
+    public string GameId { get; set; } = "";
+
+    /// <summary>游戏中文名（如「狼人杀」）。</summary>
+    public string GameName { get; set; } = "";
+
+    /// <summary>游戏图标 emoji（如「🐺」）。</summary>
+    public string GameEmoji { get; set; } = "";
+
+    /// <summary>游戏主题色（十六进制），用于房间标识。</summary>
+    public string GameAccent { get; set; } = "#7C8AA5";
+
+    /// <summary>
+    /// 本游戏是否有「身份 / 玩法配置」页。false 时房主设置**隐藏**身份配置标签页
+    /// （谁是卧底没有身份配置，不该显示狼人杀的）。
+    /// </summary>
+    public bool HasPlayerConfig { get; set; }
 }
 
 /// <summary>房主修改房间设置。只需要传要改的字段（null 表示不动）。</summary>
@@ -310,6 +336,9 @@ public sealed class RoomInfoDto
 
     /// <summary>游戏图标 emoji（冗余）。</summary>
     public string GameEmoji { get; set; } = "";
+
+    /// <summary>房间绑定的游戏主题色（十六进制）：用于在列表里一眼区分不同游戏的房间。</summary>
+    public string GameAccent { get; set; } = "";
 
     /// <summary>名单人数。</summary>
     public int PlayerCount { get; set; }

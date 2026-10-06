@@ -37,6 +37,9 @@ public partial class HostSettingsWindow : Window
     private string _inviteToken = "";
     private int _playerCount;
 
+    /// <summary>本房间的游戏是否有「身份 / 玩法配置」（没有的游戏隐藏身份配置标签页）。</summary>
+    private bool _hasPlayerConfig = true;
+
     /// <summary>程序化回填期间抑制控件事件（避免把"回填"当成"用户改动"）。</summary>
     private bool _suppress;
 
@@ -99,6 +102,40 @@ public partial class HostSettingsWindow : Window
     }
 
     /// <summary>
+    /// 按房间绑定的游戏刷新窗口标识与标签页可见性：
+    /// 没有身份配置的玩法（如谁是卧底）**隐藏**「身份配置」页，避免显示狼人杀的身份表。
+    /// </summary>
+    private void ApplyGameIdentity(HostSettingsDto s)
+    {
+        _hasPlayerConfig = s.HasPlayerConfig;
+
+        var emoji = string.IsNullOrEmpty(s.GameEmoji) ? "🎮" : s.GameEmoji;
+        var name = string.IsNullOrEmpty(s.GameName) ? s.GameId : s.GameName;
+
+        GameEmojiText.Text = emoji;
+        GameBadgeBrush.Color = ParseColor(s.GameAccent, "#7C8AA5");
+        GameBadge.ToolTip = $"本房间的游戏：{emoji} {name}";
+
+        LayoutTab.Visibility = _hasPlayerConfig ? Visibility.Visible : Visibility.Collapsed;
+        if (!_hasPlayerConfig && ReferenceEquals(Tabs.SelectedItem, LayoutTab))
+            Tabs.SelectedIndex = 0;
+
+        Title = $"房主设置 · {emoji} {name}";
+    }
+
+    /// <summary>十六进制 → Color；非法值回退 <paramref name="fallback"/>。</summary>
+    private static System.Windows.Media.Color ParseColor(string? hex, string fallback)
+    {
+        foreach (var candidate in new[] { hex, fallback })
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            try { return (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(candidate)!; }
+            catch { /* 换下一个候选 */ }
+        }
+        return System.Windows.Media.Colors.Gray;
+    }
+
+    /// <summary>
     /// 完整回填（**只用于首次加载与保存之后**）：会覆盖输入框、密码框与勾选状态。
     /// 轮询路径不要用这个 —— 见 <see cref="RefreshFromServerState"/>。
     /// </summary>
@@ -116,6 +153,8 @@ public partial class HostSettingsWindow : Window
         RoomText.Text = HeaderText(settings);
         MaxPlayersInput.Text = settings.MaxPlayers.ToString();
         MaxPlayersHint.Text = MaxPlayersTip(settings);
+
+        ApplyGameIdentity(settings);   // 游戏标识 + 是否显示「身份配置」页
 
         ClearPasswordBox.IsChecked = false;
         PasswordInput.Password = "";
@@ -146,6 +185,9 @@ public partial class HostSettingsWindow : Window
     public void RefreshFromServerState(HostSettingsDto settings)
     {
         _settings = settings;
+
+        // 游戏标识 / 标签页可见性（跟随人数变化重排时顺带刷新一次）。
+        ApplyGameIdentity(settings);
 
         // 邀请令牌可能被别处重置：只在真的变了才刷新（避免打断输入框的选中）。
         if (_inviteToken != settings.InviteToken)
@@ -315,7 +357,10 @@ public partial class HostSettingsWindow : Window
 
         // 自动模式下发空串（= 未自定义），服务端会按开局时的实际人数推导布局，
         // 因此人数之后再变也不会失配；手动模式才下发具体的身份配比。
-        var layoutJson = AutoLayout ? "" : JsonSerializer.Serialize(BuildLayout(), Json);
+        // 没有身份配置的玩法（如谁是卧底）下发 null = 「不动这一项」，不会把狼人杀的身份表写进去。
+        string? layoutJson;
+        if (!_hasPlayerConfig) layoutJson = null;
+        else layoutJson = AutoLayout ? "" : JsonSerializer.Serialize(BuildLayout(), Json);
 
         var clear = ClearPasswordBox.IsChecked == true;
         var newPassword = PasswordInput.Password;
@@ -326,21 +371,16 @@ public partial class HostSettingsWindow : Window
         var result = await _client.UpdateRoomSettingsAsync(maxPlayers, newPassword.Length > 0 ? newPassword : null,
                                                           clear, layoutJson);
 
-        SaveButton.IsEnabled = true;
-
         if (!result.Ok)
         {
+            SaveButton.IsEnabled = true;
             SetStatus(string.IsNullOrEmpty(result.Message) ? "保存失败。" : result.Message, error: true);
             return;
         }
 
-        SetStatus(clear
-            ? "✅ 已保存：房间已改为公开房间（邀请码仍然有效）。"
-            : newPassword.Length > 0
-                ? "✅ 已保存。房间密码已更新——已发出的邀请码仍然有效。"
-                : "✅ 已保存房间设置。", error: false);
-
-        await ReloadAsync();
+        _poll.Stop();
+        DialogResult = true;   // 保存成功 → 自动关闭（v2.3.1：之前保存后窗口一直开着）
+        Close();
     }
 
     private void CopyInvite_OnClick(object sender, RoutedEventArgs e)

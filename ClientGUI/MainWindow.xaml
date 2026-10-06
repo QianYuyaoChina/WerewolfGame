@@ -7,7 +7,7 @@
         xmlns:views="clr-namespace:ClientGUI.Views"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:GameViewModel}"
-        Title="狼人杀 · 客户端"
+        Title="{Binding WindowTitle}"
         Height="780" Width="1220" MinHeight="640" MinWidth="1000"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource BgBrush}"
@@ -84,10 +84,13 @@
                 BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1">
             <Grid>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="🐺" FontSize="20" VerticalAlignment="Center" />
-                    <TextBlock Text="狼人杀" FontSize="17" FontWeight="Bold" Margin="8,0,0,0"
-                               VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
-                    <TextBlock Text="客户端" FontSize="12" Margin="8,2,0,0" VerticalAlignment="Center"
+                    <!-- 游戏标识：图标 + 中文名 + **游戏主题色**，不同游戏的房间一眼就能分辨。 -->
+                    <Border CornerRadius="7" Padding="11,4" BorderThickness="1.4"
+                            BorderBrush="{Binding GameAccentHex, Converter={StaticResource HexToBrush}}">
+                        <TextBlock Text="{Binding GameLabelText}" FontSize="15.5" FontWeight="Bold"
+                                   Foreground="{Binding GameAccentHex, Converter={StaticResource HexToBrush}}" />
+                    </Border>
+                    <TextBlock Text="客户端" FontSize="12" Margin="9,2,0,0" VerticalAlignment="Center"
                                Foreground="{DynamicResource MutedBrush}" />
                 </StackPanel>
 
@@ -103,7 +106,7 @@
                             Click="Menu_Settings_OnClick" ToolTip="外观与主界面设置（快捷键 Ctrl + ,）" />
                     <Button Content="👑 房主设置" Style="{StaticResource FlatButton}" Padding="12,6" Margin="0,0,12,0"
                             Click="Menu_HostSettings_OnClick" IsEnabled="{Binding IsHost}"
-                            ToolTip="房间人数 / 密码 / 身份配置 / 邀请码（仅房主）" />
+                            ToolTip="房间人数 / 密码 / 邀请码（仅房主；身份等玩法配置按游戏显示）" />
 
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                                 Visibility="{Binding IsJoined, Converter={StaticResource BoolToVisibility}}">

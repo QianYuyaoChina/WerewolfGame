@@ -14,6 +14,8 @@
 | ③ 操作协议 | `<Game>Ops` + payload DTO | `WerewolfGame/Games/<Game>/` + `Werewolf.Client.Share/Games/` | 否 |
 | ④ 面板 | GUI 面板 + 控制台模块 | `ClientGUI/Views/Games/` + `Werewolf.Client/Games/` | **注册点**：`GameViewModelFactory` 一条 case、`Themes/GamePanels.xaml` 一条模板、`ConsoleGameRegistry` 一条 case |
 | ⑤（可选）规则说明 | `GameInfo.RulesText` | 同 ① | 否 |
+| ⑥（可选）房间标识 | `GameInfo.AccentHex` / `HasPlayerConfig` | 同 ① | 否 |
+| ⑦（可选）接管发言 | `IGameInstance.OnPlayerChat` | 同 ② | 否 |
 
 > 「注册点」= 工厂 switch 与 DataTemplate 表。它们是**插件的登记处**，不是平台逻辑；`RoomManager`/账号/邀请码/重连/主题/大厅宿主逻辑**一行都不用改**。
 
@@ -381,11 +383,15 @@ internal static class ConsoleGameRegistry
 
 ---
 
-## 4. 「谁是卧底」接入示例（本轮不实现，仅论证）
+## 4. 「谁是卧底」（已落地，v2.3 起）
 
-- **需要的扩展点**：① 向每位玩家**私发不同私有信息**（词条，而非「身份名」）→ 由 `IGameInstance.BuildPayload(viewerConnectionId)` 的**视角隔离**天然支持（每个玩家拿到自己的 DTO）；② 描述环节 + 投票环节 → 游戏自定 `Phase`（私有，框架无感）；③ 无夜晚角色动作 → `RunAsync` 可不做定时阶段，纯事件驱动。
-- **结论**：完全由接入点 1–4 覆盖，**不需要新增框架能力**。
+- **需要的扩展点**：① 向每位玩家**私发不同私有信息**（词条，而非「身份名」）→ 由 `IGameInstance.BuildPayload(viewerConnectionId)` 的**视角隔离**天然支持（每个玩家拿到自己的 DTO）；② 描述环节 + 投票环节 → 游戏自定 `Phase`（私有，框架无感）；③ 无夜晚角色动作 → `RunAsync` 只驱动自己的阶段循环。
+- **结论**：完全由接入点 1–4 覆盖，**没有新增框架能力**。
 - **注意**：词条**只能**进 `GamePayload`（本人视角）；`PlayerDto.Tag` 对卧底应留空或用中立标记（如「已描述」），**严禁**把词条放进 `Tag`/广播消息。
+- **v2.3.1 的两个可复用钩子**（其他游戏按需取用）：
+  - `GameInfo.HasPlayerConfig = false` → 房主设置**隐藏**「身份配置」页（该页是狼人杀专属），保存时也不会写入狼人杀的身份布局。
+  - `IGameInstance.OnPlayerChat(player, text)` → 平台在**广播聊天之前**先问一次，返回 `(false, 原因)` 即可拒绝插话。谁是卧底用它实现「按顺序轮流发言」：轮到谁谁才能发，发言即视为本轮完成；GUI 侧由 `IGameViewModel.CanSendChat / SendChatHint` 同步禁用「发送」按钮。
+- 校验：`ClientGUI.Tests --undercover <url>`（需小局配置：`Undercover:DescribeSeconds/VoteSeconds` 调小）。
 
 ---
 
@@ -405,6 +411,9 @@ internal static class ConsoleGameRegistry
 - [ ] 私有信息只出现在 `BuildPayload` 里（视角隔离），**没有**进 `PlayerDto` / 广播。
 - [ ] 操作 op 前缀带游戏名（如 `uc_`），避免与其他游戏冲突。
 - [ ] 未修改 §1 红名单里的任何平台文件。
+- [ ] `GameInfo.AccentHex` 给了本游戏的主题色（房间列表 / 标题栏 / 房主设置据此区分房间）。
+- [ ] 无「身份 / 玩法配置」的玩法显式设了 `HasPlayerConfig = false`。
+- [ ] 若限制发言顺序：服务端覆写 `OnPlayerChat`，GUI 侧同步实现 `CanSendChat` / `SendChatHint`。
 - [ ] GUI：面板用 `{DynamicResource ...}` 引用既有配色键；如需新键，**两套配色都加**（否则 `--ui` 失败）。
 - [ ] 控制台：`help` 合并了本游戏指令，狼人杀既有指令不受影响。
 - [ ] 跑一遍 `ClientGUI.Tests` 默认模式 + `--ui`，均通过。

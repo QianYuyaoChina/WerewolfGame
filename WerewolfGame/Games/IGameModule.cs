@@ -113,6 +113,14 @@ public interface IGameInstance
     void OnPlayerLeft(RoomPlayer player, bool stillInGame) { }
 
     void OnPlayerReconnected(RoomPlayer player) { }
+
+    /// <summary>
+    /// 玩家要在房间里发一条聊天。平台**在广播之前**先问一次，
+    /// 因此「轮流发言」类玩法可以拒绝插话（返回 false 时消息不会发出去）。
+    /// 玩法借此推进自己的流程（例如把当前发言人标记为「已发言」）。
+    /// </summary>
+    /// <returns>(是否放行, 拒绝原因)；默认一律放行。</returns>
+    (bool ok, string msg) OnPlayerChat(RoomPlayer player, string text) => (true, "");
 }
 
 /// <summary>游戏模块 = 元数据 + 工厂（服务端注册单元）。反射发现要求「公共无参构造」。</summary>

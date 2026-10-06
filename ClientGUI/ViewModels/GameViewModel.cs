@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -262,8 +263,36 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
     public bool ShowStartHint => !IsHost;
 
     public string ChatText { get => _chatText; set => Set(ref _chatText, value); }
-    public bool CanChat => IsJoined && IsAlive;
-    public string ChatHint => !IsJoined ? "" : IsAlive ? "" : "你已出局，无法发言。";
+
+    /// <summary>
+    /// 是否可发言：既要有房间 + 未出局，还要**游戏面板允许**（按顺序发言的玩法只有轮到自己才行）。
+    /// </summary>
+    public bool CanChat => IsJoined && IsAlive && (Game?.CanSendChat ?? true);
+
+    /// <summary>不能发言时的说明（显示在输入框上）。</summary>
+    public string ChatHint => !IsJoined ? ""
+        : !IsAlive ? "你已出局，无法发言。"
+        : (Game?.SendChatHint ?? "");
+
+    // ---------------- 游戏标识（区分不同游戏的房间） ----------------
+
+    private string _gameName = "";
+    private string _gameEmoji = "";
+    private string _gameAccent = "";
+
+    /// <summary>当前房间的游戏显示名（服务端下发）。</summary>
+    public string GameNameText => _gameName;
+
+    /// <summary>「🐺 狼人杀」这样的游戏标识（未进房 / 未知时给中性文案）。</summary>
+    public string GameLabelText => _gameName.Length == 0 ? "🎮 多游戏平台" : $"{_gameEmoji} {_gameName}";
+
+    /// <summary>游戏主题色（十六进制）；空则用主题默认色。</summary>
+    public string GameAccentHex => _gameAccent;
+
+    /// <summary>窗口标题随房间绑定的游戏变化，让不同游戏的房间一眼可辨。</summary>
+    public string WindowTitle => _gameName.Length == 0
+        ? "多游戏平台 · 客户端"
+        : $"{_gameEmoji} {_gameName} · 客户端";
 
     public string EndpointText => IsJoined ? $"服务器：{_client.Endpoint}" : "";
 
@@ -472,10 +501,11 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
         if (text.Length == 0) return;
         if (!CanChat)
         {
-            LogStatus = "你已出局，无法发言。";
+            LogStatus = ChatHint.Length > 0 ? ChatHint : "当前无法发言。";
             return;
         }
 
+        // 发送后立刻清空输入框（v2.3.1）；失败时下面会把原文回填，不让用户白打一遍。
         ChatText = "";
 
         // 直接在 UI 线程上等待，异常只写日志，不冒泡到全局。
@@ -486,11 +516,19 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
     {
         try
         {
-            await _client.ChatAsync(text);
+            // 用「带回执」的调用：轮流发言的玩法会在服务端拒绝插话，这里要把原因显示出来。
+            var r = await _client.CallGameOpAsync(Ops.Chat,
+                JsonSerializer.SerializeToNode(new ChatPayload { Text = text }));
+
+            if (r.ok) return;
+
+            AddLog("⚠️ " + (string.IsNullOrEmpty(r.msg) ? "发言失败。" : r.msg), LogKinds.Error);
+            if (ChatText.Length == 0) ChatText = text;   // 没发出去就把原文还给用户
         }
         catch (Exception ex)
         {
             AddLog("⚠️ 发言失败：" + ex.Message, LogKinds.Error);
+            if (ChatText.Length == 0) ChatText = text;
         }
     }
 
@@ -569,6 +607,18 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
         RoomName = s.RoomName;
         HostName = s.HostName;
 
+        // 游戏标识（显示名 / 图标 / 主题色）：用于标题栏与房间头部区分不同游戏。
+        if (!string.IsNullOrEmpty(s.GameName))
+        {
+            _gameName = s.GameName;
+            _gameEmoji = s.GameEmoji;
+            _gameAccent = s.GameAccent;
+            OnPropertyChanged(nameof(GameNameText));
+            OnPropertyChanged(nameof(GameLabelText));
+            OnPropertyChanged(nameof(GameAccentHex));
+            OnPropertyChanged(nameof(WindowTitle));
+        }
+
         // 收到带房间号的状态即确认「已在房间」——不依赖构造时机，避免进房早于界面创建时判断失准。
         if (!string.IsNullOrEmpty(s.RoomId)) IsJoined = true;
 
@@ -579,6 +629,9 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
         Game!.OnState(s);
         UpdateTargetHighlight();
 
+        // 面板可能改变了「现在能不能发言」（如换成别人发言）→ 同步聊天区的可用状态。
+        OnPropertyChanged(nameof(CanChat));
+        OnPropertyChanged(nameof(ChatHint));
         OnPropertyChanged(nameof(CanStartGame));
     }
 

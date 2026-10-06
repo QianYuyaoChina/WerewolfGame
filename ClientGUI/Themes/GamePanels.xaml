@@ -1,8 +1,9 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:vmw="clr-namespace:ClientGUI.ViewModels.Games.Werewolf"
-                    xmlns:vmu="clr-namespace:ClientGUI.ViewModels.Games"
-                    xmlns:v="clr-namespace:ClientGUI.Views.Games">
+    xmlns:vmw="clr-namespace:ClientGUI.ViewModels.Games.Werewolf"
+    xmlns:vmu="clr-namespace:ClientGUI.ViewModels.Games.Undercover"
+    xmlns:vmg="clr-namespace:ClientGUI.ViewModels.Games"
+    xmlns:v="clr-namespace:ClientGUI.Views.Games">
 
     <!--
         游戏操作面板的模板注册表：按视图模型的**运行时类型**（DataType）选择面板。
@@ -13,7 +14,11 @@
         <v:WerewolfPanel />
     </DataTemplate>
 
-    <DataTemplate DataType="{x:Type vmu:UnknownGameViewModel}">
+    <DataTemplate DataType="{x:Type vmu:UndercoverViewModel}">
+        <v:UndercoverPanel />
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type vmg:UnknownGameViewModel}">
         <v:UnknownGamePanel />
     </DataTemplate>
 

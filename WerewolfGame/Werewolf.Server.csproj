@@ -9,4 +9,17 @@
 	<ItemGroup>
 		<ProjectReference Include="..\Werewolf.Client.Share\Werewolf.Client.Share.csproj" />
 	</ItemGroup>
+
+	<!--
+		谁是卧底的**默认词库**（随源码维护）：
+		① 嵌进程序集（LogicalName 固定为 words.undercover.txt，运行时按此名读取）——
+		   无论部署到哪个目录，缺失词库时都能用内置这份兜底；
+		② 同时复制到输出目录——本地调试 / 发布后工作目录里直接就有一份，可就地改词后重启生效。
+		改完本文件后重新编译即可让新词生效。
+	-->
+	<ItemGroup>
+		<None Remove="words.undercover.txt" />
+		<EmbeddedResource Include="words.undercover.txt" LogicalName="words.undercover.txt" />
+		<None Include="words.undercover.txt" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 </Project>

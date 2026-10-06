@@ -54,6 +54,15 @@ public interface IGameViewModel
     /// <summary>阶段提示文字。</summary>
     string Hint { get; }
 
+    /// <summary>
+    /// 当前是否允许发言（宿主用它决定聊天输入框与「发送」按钮是否可用）。
+    /// 按顺序发言的玩法（如谁是卧底）只有轮到自己时才返回 true；默认实现返回 true。
+    /// </summary>
+    bool CanSendChat { get; }
+
+    /// <summary>不能发言时的原因（显示在聊天输入框上）；可以发言时返回空串。</summary>
+    string SendChatHint { get; }
+
     /// <summary>左栏玩家行是否可作为本游戏当前操作的「目标」。</summary>
     bool CanSelectPlayer(PlayerRow row);
 

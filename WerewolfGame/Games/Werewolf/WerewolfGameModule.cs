@@ -17,6 +17,8 @@ public sealed class WerewolfGameModule : IGameModule
         Tagline = "村民与狼人的推理对抗，夜晚与白天交替进行",
         MinPlayers = 4,
         MaxPlayers = 12,
+        AccentHex = "#9B8CFF",    // 紫：与谁是卧底的青绿一眼区分
+        HasPlayerConfig = true,   // 狼人杀有「身份配置」页（房主设置里展示）
         RulesText = "夜晚守卫/狼人/女巫/预言家依次行动；白天讨论后投票放逐；屠边或消灭全部狼人即分出胜负。"
     };
 

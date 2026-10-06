@@ -27,6 +27,15 @@ public sealed class GameInfo
     /// <summary>可选：设置 / 图鉴展示的规则说明。</summary>
     public string? RulesText { get; set; }
 
+    /// <summary>
+    /// 游戏主题色（十六进制）：房间列表的「游戏」列、房间头部标识都用它，
+    /// 让**不同游戏的房间一眼就能分辨**。
+    /// </summary>
+    public string AccentHex { get; set; } = "#7C8AA5";
+
+    /// <summary>本游戏是否有「身份 / 玩法配置」页（房主设置里按游戏显示，避免串味）。</summary>
+    public bool HasPlayerConfig { get; set; }
+
     /// <summary>列表 / 标题里的「图标 + 显示名」，映射集中在此，避免两端拼写漂移。</summary>
     public string Label => string.IsNullOrEmpty(Emoji) ? DisplayName : $"{Emoji} {DisplayName}";
 

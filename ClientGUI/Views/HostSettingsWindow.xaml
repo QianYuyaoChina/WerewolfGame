@@ -38,9 +38,15 @@
 
         <!-- ═══════════════ 标题 ═══════════════ -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
-            <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource CardBrush}"
-                    VerticalAlignment="Center">
-                <TextBlock Text="👑" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <!-- 游戏标识：不同游戏的房间一眼可辨（图标 + 中文名 + 主题色） -->
+            <Border x:Name="GameBadge" Width="44" Height="44" CornerRadius="12"
+                    Background="{DynamicResource CardBrush}"
+                    BorderThickness="1.5" VerticalAlignment="Center">
+                <Border.BorderBrush>
+                    <SolidColorBrush x:Name="GameBadgeBrush" Color="#7C8AA5" />
+                </Border.BorderBrush>
+                <TextBlock x:Name="GameEmojiText" Text="🎮" FontSize="20"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
                 <TextBlock Text="房主设置" FontSize="17" FontWeight="Bold"
@@ -73,7 +79,8 @@
             </TabItem>
 
             <!-- ─────────── 身份配置 ─────────── -->
-            <TabItem Header="身份配置">
+            <!-- 只有 HasPlayerConfig 的游戏（如狼人杀）才显示；谁是卧底等没有身份配置的玩法会隐藏本页。 -->
+            <TabItem x:Name="LayoutTab" Header="身份配置">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />

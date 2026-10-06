@@ -1,4 +1,5 @@
 using ClientGUI.ViewModels.Games;
+using ClientGUI.ViewModels.Games.Undercover;
 using ClientGUI.ViewModels.Games.Werewolf;
 using Werewolf.Client.Share;
 
@@ -16,6 +17,7 @@ internal static class GameViewModelFactory
         return id switch
         {
             GameIds.Werewolf => new WerewolfViewModel(client, bridge),
+            GameIds.Undercover => new UndercoverViewModel(client, bridge),
             _ => new UnknownGameViewModel(id)
         };
     }

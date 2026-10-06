@@ -11,7 +11,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:LoginViewModel}"
         Title="狼人杀 · 登录"
-        Height="755" Width="450"
+        Height="682" Width="450"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource BgBrush}"
@@ -54,8 +54,8 @@
                 <TextBlock Text="狼人杀" FontSize="22" FontWeight="Bold" Margin="10,0,0,0"
                            VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
-            <TextBlock Text="登录后进入房间列表" FontSize="12" Margin="0,8,0,0"
-                       HorizontalAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
+            <TextBlock Text="登录后进入房间列表" FontSize="12" Margin="142,33,0,-26"
+                       HorizontalAlignment="Left" Foreground="{DynamicResource MutedBrush}" />
 
             <!-- 设置入口统一放右上角（与主窗口、房间列表一致） -->
             <Button Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="12,6"

@@ -216,7 +216,12 @@ public class GameRoom : IGameContext
                 Running = _game.Status == GameStatus.Running,
                 PlayerCount = _players.Count,
                 GameSettingsJson = _gameSettingsJson,
-                CustomGameSettings = _gameSettingsJson != null
+                CustomGameSettings = _gameSettingsJson != null,
+                GameId = _game.Info.GameId,
+                GameName = _game.Info.DisplayName,
+                GameEmoji = _game.Info.Emoji,
+                GameAccent = _game.Info.AccentHex,
+                HasPlayerConfig = _game.Info.HasPlayerConfig
             };
         }
     }
@@ -314,6 +319,7 @@ public class GameRoom : IGameContext
                 GameId = GameId,
                 GameName = info.DisplayName,
                 GameEmoji = info.Emoji,
+                GameAccent = info.AccentHex,
                 PlayerCount = _players.Count,
                 MaxPlayers = MaxPlayers,
                 Status = _game.Status.ToString(),
@@ -473,6 +479,26 @@ public class GameRoom : IGameContext
     }
 
     /// <summary>
+    /// 房内聊天的唯一入口：先过游戏门禁，再广播。
+    /// 「轮流发言」类玩法（谁是卧底）会在 <see cref="IGameInstance.OnPlayerChat"/> 里拒绝插话，
+    /// 因此**没轮到的人发的消息不会出现在别人的屏幕上**。
+    /// </summary>
+    /// <returns>(是否放行, 拒绝原因)</returns>
+    public async Task<(bool ok, string msg)> SubmitChatAsync(string connectionId, string text)
+    {
+        var player = GetPlayer(connectionId);
+        if (player == null) return (false, ServerMessages.NotInRoom);
+        if (!player.IsAlive) return (false, ServerMessages.Dead);
+
+        var (ok, msg) = _game.OnPlayerChat(player, text);
+        if (!ok) return (false, msg);
+
+        await BroadcastAsync($"💬 {player.Username}：{text}");
+        await BroadcastStateAsync();
+        return (true, "");
+    }
+
+    /// <summary>
     /// 取某个连接视角下的当前状态快照；该连接不在本房间时返回 null。
     /// 通用字段由平台填充，游戏私有负载与玩家标签由游戏实例填充。
     /// </summary>
@@ -493,10 +519,14 @@ public class GameRoom : IGameContext
     private GameStateDto BuildStateFor(RoomPlayer viewer)
     {
         var status = _game.Status;
+        var info = _game.Info;
 
         var dto = new GameStateDto
         {
             GameId = GameId,
+            GameName = info.DisplayName,
+            GameEmoji = info.Emoji,
+            GameAccent = info.AccentHex,
             RoomId = Id,
             RoomName = Name,
             HostName = _players.FirstOrDefault(p => p.IsHost)?.Username ?? "",

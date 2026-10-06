@@ -1,6 +1,11 @@
 ﻿using Werewolf.Server;
 using Werewolf.Server.Games;
 
+// 配置自愈：appsettings.json 缺失 / 损坏时自动生成默认配置并警告，保证服务器始终能起来。
+// （必须在 CreateBuilder 之前：否则读配置时就会抛异常，或静默用内置缺省值。）
+foreach (var line in ConfigBootstrap.Ensure())
+    Console.WriteLine(line);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSignalR();

@@ -135,9 +135,14 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="{Binding Id}" FontSize="13" FontWeight="SemiBold"
                                        Foreground="{DynamicResource TextSoftBrush}" VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1" Text="{Binding GameText}" FontSize="12.5"
-                                       TextTrimming="CharacterEllipsis" Foreground="{DynamicResource AccentBrush}"
-                                       VerticalAlignment="Center" />
+                            <!-- 「游戏」列用小胶囊 + 游戏主题色：不同游戏的房间在列表里就能一眼分开。 -->
+                            <Border Grid.Column="1" CornerRadius="5" Padding="8,3" HorizontalAlignment="Left"
+                                    VerticalAlignment="Center" BorderThickness="1.2"
+                                    BorderBrush="{Binding GameAccent, Converter={StaticResource HexToBrush}}">
+                                <TextBlock Text="{Binding GameText}" FontSize="12.5"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{Binding GameAccent, Converter={StaticResource HexToBrush}}" />
+                            </Border>
                             <TextBlock Grid.Column="2" Text="{Binding Name}" FontSize="13.5"
                                        TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"
                                        VerticalAlignment="Center" />

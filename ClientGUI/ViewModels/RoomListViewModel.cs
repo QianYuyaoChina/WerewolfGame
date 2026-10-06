@@ -19,6 +19,9 @@ public sealed class RoomRow
     /// <summary>游戏图标。</summary>
     public string GameEmoji { get; init; } = "";
 
+    /// <summary>游戏主题色（十六进制），列表里用它给「游戏」列上色，不同游戏的房间一眼可辨。</summary>
+    public string GameAccent { get; init; } = "";
+
     public int PlayerCount { get; init; }
     public int MaxPlayers { get; init; }
     public string Status { get; init; } = "";
@@ -168,6 +171,7 @@ public sealed class RoomListViewModel : ObservableObject
                     GameId = dto.GameId,
                     GameName = dto.GameName,
                     GameEmoji = dto.GameEmoji,
+                    GameAccent = dto.GameAccent,
                     PlayerCount = dto.PlayerCount,
                     MaxPlayers = dto.MaxPlayers,
                     Status = dto.Status,

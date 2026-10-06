@@ -29,6 +29,15 @@ public class GameStateDto
     /// <summary>房间绑定的游戏机器名（<see cref="GameIds"/>）。</summary>
     public string GameId { get; set; } = GameIds.Werewolf;
 
+    /// <summary>游戏显示名（如「谁是卧底」）：界面据此区分不同游戏的房间。</summary>
+    public string GameName { get; set; } = "";
+
+    /// <summary>游戏图标（emoji）。</summary>
+    public string GameEmoji { get; set; } = "";
+
+    /// <summary>游戏主题色（十六进制）：标题栏 / 房间头部据此区分不同游戏。</summary>
+    public string GameAccent { get; set; } = "";
+
     /// <summary>当前所属房间号（5 位）。</summary>
     public string RoomId { get; set; } = "";
 

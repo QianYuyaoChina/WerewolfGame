@@ -30,7 +30,8 @@ public static class ConsoleGameRegistry
     private static readonly Dictionary<string, IConsoleGameModule> Modules =
         new(StringComparer.Ordinal)
         {
-            [GameIds.Werewolf] = new WerewolfConsoleModule()
+            [GameIds.Werewolf] = new WerewolfConsoleModule(),
+            [GameIds.Undercover] = new UndercoverConsoleModule()
         };
 
     /// <summary>服务器上线了本客户端不认识的游戏时的兜底模块。</summary>

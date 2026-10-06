@@ -407,13 +407,16 @@ public class GameHub : Hub
         if (room == null) return RpcReply.Error(ServerMessages.NotInRoom);
 
         var player = room.GetPlayer(Context.ConnectionId);
-        if (player == null || !player.IsAlive) return RpcReply.Error("你已出局，无法发言。");
+        if (player == null) return RpcReply.Error(ServerMessages.NotInRoom);
+        if (!player.IsAlive) return RpcReply.Error(ServerMessages.Dead);
 
         var text = payload?.Deserialize<ChatPayload>(Json)?.Text ?? "";
         if (string.IsNullOrWhiteSpace(text)) return RpcReply.Error("消息不能为空。");
 
-        await room.BroadcastAsync($"💬 {player.Username}：{text.Trim()}");
-        return RpcReply.Success();
+        // 交给房间统一处理：**先过游戏的发言门禁**（轮流发言的玩法会拒绝插话），
+        // 通过后才广播给全房间，并顺带广播一次状态（发言进度）。
+        var (ok, msg) = await room.SubmitChatAsync(Context.ConnectionId, text.Trim());
+        return ok ? RpcReply.Success() : RpcReply.Error(msg);
     }
 
     // ==================== 连接生命周期 ====================

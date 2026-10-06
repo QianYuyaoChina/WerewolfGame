@@ -96,6 +96,12 @@ public sealed class WerewolfViewModel : ObservableObject, IGameViewModel
     /// <inheritdoc />
     public string Hint => ActionHint;
 
+    /// <summary>狼人杀的聊天不受阶段限制（死亡/未进房由宿主负责拦）。</summary>
+    public bool CanSendChat => true;
+
+    /// <inheritdoc />
+    public string SendChatHint => "";
+
     /// <inheritdoc />
     public bool CanSelectPlayer(PlayerRow row)
     {

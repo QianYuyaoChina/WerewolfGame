@@ -36,6 +36,12 @@ public sealed class UnknownGameViewModel : ObservableObject, IGameViewModel
     }
 
     /// <inheritdoc />
+    public bool CanSendChat => true;
+
+    /// <inheritdoc />
+    public string SendChatHint => "";
+
+    /// <inheritdoc />
     public bool CanSelectPlayer(PlayerRow row) => false;
 
     /// <inheritdoc />

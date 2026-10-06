@@ -87,6 +87,38 @@ if (reconnectIndex >= 0)
     return await ReconnectProbe.RunAsync(url, seconds);
 }
 
+// 谁是卧底端到端：--undercover <url>（建议小局配置）
+var undercoverIndex = Array.IndexOf(args, "--undercover");
+if (undercoverIndex >= 0)
+{
+    var url = undercoverIndex + 1 < args.Length ? args[undercoverIndex + 1] : DefaultUrl;
+    Console.WriteLine($"════════ 谁是卧底端到端（{url}） ════════");
+    var uc = await UndercoverProbe.RunAsync(url);
+    Console.WriteLine();
+    foreach (var note in uc.Notes) Console.WriteLine("   " + note);
+    Console.WriteLine();
+    Console.WriteLine(uc.Ok ? "✅ 通过" : "❌ 存在问题");
+    return uc.Ok ? 0 : 1;
+}
+
+// 谁是卧底「白板」端到端（QA 新增，≥7 人局）：--ucblank <url> [人数]
+var ucBlankIndex = Array.IndexOf(args, "--ucblank");
+if (ucBlankIndex >= 0)
+{
+    var url = ucBlankIndex + 1 < args.Length ? args[ucBlankIndex + 1] : DefaultUrl;
+    var count = 7;
+    if (ucBlankIndex + 2 < args.Length && int.TryParse(args[ucBlankIndex + 2], out var parsed) && parsed >= 3)
+        count = parsed;
+
+    Console.WriteLine($"════════ 谁是卧底 · 白板端到端（{url}，{count} 人） ════════");
+    var blank = await UndercoverBlankProbe.RunAsync(url, count);
+    Console.WriteLine();
+    foreach (var note in blank.Notes) Console.WriteLine("   " + note);
+    Console.WriteLine();
+    Console.WriteLine(blank.Ok ? "✅ 通过" : "❌ 存在问题");
+    return blank.Ok ? 0 : 1;
+}
+
 // 新身份（丘比特 / 警长 / 自定义布局）：--newroles <url>（需小局配置）
 var newRolesIndex = Array.IndexOf(args, "--newroles");
 if (newRolesIndex >= 0)
@@ -144,6 +176,12 @@ NewRolesTests.RunAll();
 
 Console.WriteLine("════════ 反作弊：服务端校验 ════════");
 AntiCheatTests.RunAll();
+
+Console.WriteLine("════════ 谁是卧底：词库与发牌 ════════");
+UndercoverTests.RunAll();
+
+Console.WriteLine("════════ 谁是卧底：QA 独立复核（隐藏阵营 / 白板） ════════");
+UndercoverQaAudit.RunAll();
 
 Console.WriteLine("════════ 多房间纯逻辑校验 ════════");
 RoomTests.RunAll();

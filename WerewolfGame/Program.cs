@@ -6,42 +6,18 @@ using Werewolf.Server.Games;
 foreach (var line in ConfigBootstrap.Ensure())
     Console.WriteLine(line);
 
-var builder = WebApplication.CreateBuilder(args);
+// 组合根下沉到 ServerBootstrap：独立 exe 与进程内内置服务器（EmbeddedServerHost）
+// 共用同一份 DI / 中间件 / 游戏发现，保证两者功能等价。
+// 控制台输出、端口与工作目录的决策留在本文件（宿主方职责）。
+var app = ServerBootstrap.Build(new ServerBootstrapOptions
+{
+    ContentRoot = Directory.GetCurrentDirectory(),   // 与改造前一致：工作目录 = 当前目录
+    Url = "http://0.0.0.0:5000",                     // 与改造前一致
+    Args = args
+});
 
-builder.Services.AddSignalR();
-builder.Services.AddSingleton<AccountStore>();
-builder.Services.AddSingleton<CryptoSessionStore>();
-builder.Services.AddSingleton<EncryptedChannel>();
-
-// 只读配置门面：游戏模块经 IGameContext.Config 按节点名自取规则（如从 GameRules 节点读时长 / 人数）。
-builder.Services.AddSingleton<IGameConfig>(new GameConfig(builder.Configuration));
-
-// 游戏注册表：反射发现程序集内所有「公共无参构造」的 IGameModule 实现。
-// 新增游戏只需新增一个模块文件，本组合根（Program.cs）无需改动，也绝不引用任何具体游戏类型。
-var catalog = new GameCatalog();
-catalog.RegisterAll(GameDiscovery.Discover(typeof(Program).Assembly));
-builder.Services.AddSingleton<IGameCatalog>(catalog);
-
-// 房间运行参数（宽限期 / 房间上限 / 扫描间隔）从 appsettings.json 的 Room 节点读取。
-var roomOptions = builder.Configuration.GetSection("Room").Get<RoomOptions>() ?? new RoomOptions();
-builder.Services.AddSingleton(roomOptions);
-
-// 多游戏：注册表（纯注册表）+ 后台回收服务（周期回收空房）。
-builder.Services.AddSingleton<RoomManager>();
-builder.Services.AddHostedService<RoomRecycleService>();
-
-builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
-
-// 明文 HTTP 传输：不再使用 TLS 证书。
-// 机密性与身份认证改由应用层保证——连接建立时用「PSK 认证的快速幂 Diffie-Hellman」握手，
-// 之后所有收发内容都用协商出的密钥 AES-GCM 加密（见 GameHub/EncryptedChannel）。
-builder.WebHost.UseUrls("http://0.0.0.0:5000");
-
-var app = builder.Build();
-app.UseCors();
-app.MapHub<GameHub>("/gamehub");
-app.MapGet("/", () => "🕹 Game platform server is running.");
+var catalog = app.Services.GetRequiredService<IGameCatalog>();
+var roomOptions = app.Services.GetRequiredService<RoomOptions>();
 
 Console.WriteLine("多游戏房间服务端已启动：http://localhost:5000/gamehub");
 Console.WriteLine("传输加密：PSK 认证 DH 握手 + AES-GCM 会话加密（应用层，未使用 TLS）");

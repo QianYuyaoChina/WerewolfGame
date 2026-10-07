@@ -147,6 +147,32 @@ if (hostInviteIndex >= 0)
     return hostInvite.Ok ? 0 : 1;
 }
 
+// 内置服务器端到端自检：--embedded（进程内起服，不依赖外部服务端）
+if (Array.IndexOf(args, "--embedded") >= 0)
+{
+    Console.WriteLine("════════ 内置服务器端到端自检 ════════");
+    var embeddedOk = await EmbeddedServerProbe.RunAsync();
+    Console.WriteLine();
+    foreach (var f in Check.FailureList) Console.WriteLine("   · " + f);
+    Console.WriteLine(Check.FailureList.Count == 0
+        ? $"✅ 内置服务器自检通过：{Check.Passed} 项断言"
+        : $"❌ 内置服务器自检失败 {Check.FailureList.Count} 项");
+    return embeddedOk && Check.FailureList.Count == 0 ? 0 : 1;
+}
+
+// 内置服务器：QA 独立复核（真实起服 + 关窗收尾语义）—— --embeddedqa
+if (Array.IndexOf(args, "--embeddedqa") >= 0)
+{
+    Console.WriteLine("════════ 内置服务器：QA 独立复核 ════════");
+    var qaOk = await EmbeddedServerQaAudit.RunAsync();
+    Console.WriteLine();
+    foreach (var f in Check.FailureList) Console.WriteLine("   · " + f);
+    Console.WriteLine(Check.FailureList.Count == 0
+        ? $"✅ 内置服务器 QA 复核通过：{Check.Passed} 项断言"
+        : $"❌ 内置服务器 QA 复核失败 {Check.FailureList.Count} 项");
+    return qaOk && Check.FailureList.Count == 0 ? 0 : 1;
+}
+
 // 端到端联调：--server <url>
 var serverIndex = Array.IndexOf(args, "--server");
 if (serverIndex >= 0 && serverIndex + 1 < args.Length)
@@ -191,6 +217,12 @@ FakeGameProbe.RunAll();
 
 Console.WriteLine("════════ 扩展性验证（QA 独立第三游戏） ════════");
 IndependentGameProbe.RunAll();
+
+// 标题由 EmbeddedServerProbe.RunLogicChecks() 自己打印（避免与这里重复输出同一行）。
+EmbeddedServerProbe.RunLogicChecks();
+
+Console.WriteLine("════════ 内置服务器：QA 独立复核（纯逻辑） ════════");
+EmbeddedServerQaAudit.RunLogicChecks();
 
 Console.WriteLine();
 if (Check.FailureList.Count == 0)

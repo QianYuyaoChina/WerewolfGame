@@ -1,0 +1,125 @@
+classDiagram
+    class ServerBootstrap {
+        <<static>>
+        +Build(ServerBootstrapOptions, Action~WebApplicationBuilder~) WebApplication
+    }
+    class ServerBootstrapOptions {
+        +string ContentRoot
+        +string Url
+        +string[] Args
+    }
+
+    class EmbeddedServerHost {
+        -WebApplication? _app
+        -string _previousCwd
+        +EmbeddedServerOptions Options
+        +bool IsRunning
+        +EmbeddedServerInfo Info
+        +StartAsync(CancellationToken) Task~EmbeddedServerInfo~
+        +Snapshot() EmbeddedServerRuntime
+        +StopAsync(TimeSpan, CancellationToken) Task
+        +DisposeAsync() ValueTask
+    }
+    class EmbeddedServerOptions {
+        +int PreferredPort = 5000
+        +int PortRangeStart = 5001
+        +int PortRangeEnd = 5100
+        +bool AllowPortDrift = true
+        +string ListenAddress = "0.0.0.0"
+        +string? WorkDirectory
+        +string[]? Args
+    }
+    class EmbeddedServerInfo {
+        +bool Ok
+        +string ErrorMessage
+        +int Port
+        +string WorkDirectory
+        +string LocalUrl
+        +string LanUrl
+        +string ConnectUrl
+        +IReadOnlyList~string~ BootstrapMessages
+    }
+    class EmbeddedServerRuntime {
+        <<record>>
+        +int RoomCount
+        +int PlayerCount
+    }
+    class EmbeddedServerPaths {
+        <<static>>
+        +const string DirectoryName
+        +PreferredBase() string
+        +FallbackBase() string
+        +IsWritable(string) bool
+        +TryResolve(out string, out bool, out string) bool
+    }
+
+    class EmbeddedServerService {
+        <<WPF 单例>>
+        +static EmbeddedServerService Current
+        +EmbeddedServerState State
+        +EmbeddedServerInfo Info
+        +EmbeddedServerRuntime Runtime
+        +int Port
+        +bool AllowPortDrift
+        +string StatusText
+        +string DisplayAddress
+        +string WorkDirectoryText
+        +event Action Changed
+        +StartAsync() Task~EmbeddedServerInfo~
+        +StopAsync() Task
+    }
+    class EmbeddedServerViewModel {
+        +string PortText
+        +string StatusText
+        +string AddressText
+        +bool CanStart
+        +bool CanStop
+        +StartAndEnterCommand
+        +StartOnlyCommand
+        +StopCommand
+        +CopyAddressCommand
+        +OpenDirectoryCommand
+    }
+    class AppShutdown {
+        <<static>>
+        +LeaveRoomBudget TimeSpan
+        +StopServerBudget TimeSpan
+        +TotalBudget TimeSpan
+        +AttachSession(GameClient)
+        +SetLeaveRoomHandler(Func~Task~)
+        +RunAsync() Task
+        +RunWithPump() void
+        +ShouldConfirmClose() bool
+    }
+    class LoginViewModel {
+        +string ServerUrl
+        +string UsernameInput
+        +string PasswordInput
+        +LoginCommand
+        +LoginWithServerUrlAsync(string) Task
+        +event Action~GameClient~ LoginSucceeded
+    }
+    class GameViewModel {
+        +DisconnectCommand
+        +Func~bool~ ConfirmKeepRoom
+        +LeaveRoomForShutdownAsync() Task
+        +event Action RoomLeft
+    }
+    class EmbeddedServerConsole {
+        <<static>>
+        +ShowStartMenuAsync() Task~EmbeddedServerStartResult~
+        +ShutdownAsync(GameClient, EmbeddedServerHost) Task
+    }
+
+    ServerBootstrap ..> ServerBootstrapOptions : 使用
+    EmbeddedServerHost ..> ServerBootstrap : 调用 Build
+    EmbeddedServerHost ..> EmbeddedServerPaths : 解析工作目录
+    EmbeddedServerHost ..> EmbeddedServerOptions : 使用
+    EmbeddedServerHost --> EmbeddedServerInfo : 产出
+    EmbeddedServerHost --> EmbeddedServerRuntime : 进程内查询
+    EmbeddedServerService --> EmbeddedServerHost : 持有（0..1）
+    EmbeddedServerViewModel --> EmbeddedServerService : 绑定
+    AppShutdown --> EmbeddedServerService : 停止内置服务器
+    AppShutdown ..> GameViewModel : 经注册的离开委托
+    EmbeddedServerViewModel ..> LoginViewModel : 复用凭据与登录流程
+    EmbeddedServerConsole --> EmbeddedServerHost

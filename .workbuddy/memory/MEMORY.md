@@ -69,12 +69,36 @@
 - `UndercoverText`（在 `UndercoverOps.cs`）是双端 + 服务端统一文案源，客户端不自己拼。
 - 卧底数按人数 1/2/3；铁律 `平民 > 卧底 + 白板`。出局者身份当场公开，词到整局结束才揭晓。
 
+## 内置服务器（v2.4.0）：服务端宿主进客户端进程
+- 客户端（GUI + 控制台）可选「创建内置服务器 / 连接现有服务器」；GUI 登录窗口是**两个标签页**。
+  关窗自动停服；**在房间里时走正规「退出房间」**（复用 `GameViewModel.LeaveRoomAsync()`，
+  只把 `ConfirmKeepRoom` 置成 `()=>false`）。
+- 新增：`WerewolfGame/` 的 `ServerBootstrap`（**唯一组合根**，无 Console 输出）、`EmbeddedServerHost`、
+  `EmbeddedServerPaths`；`ClientGUI/Services/` 的 `EmbeddedServerService`、`AppShutdown`；
+  `ClientGUI/ViewModels/EmbeddedServerViewModel`；`Werewolf.Client/EmbeddedServerConsole`。
+  `Program.cs` 退化为「打印自愈提示 → Build → 打印原 5 行 → Run」，**独立服务端输出逐行不变**。
+- **WPF/控制台可直接 P2P 到 `Sdk.Web` 项目**（FrameworkReference 经 P2P 传递，无需手写），无 Main 冲突。
+  抽 `Werewolf.Server.Hosting` 中间层实测**无效**（产物照样流过来）→ 否决。
+- **客户端禁止 `using Microsoft.AspNetCore.*`**（客户端没有 ASP.NET Core 隐式 using → CS1061）。
+- **端口**：固定 5000，被占时 5001–5100 漂移并告知；**先绑定失败再换**（不先探测，避免 TOCTOU）；
+  绑定失败后 `app.Urls` 会抛 ObjectDisposedException → **实际端口从循环变量取**。
+- **工作目录靠切 CWD**：`WebApplication` 不会自动切 CWD，而词库加载依赖它 → 切是唯一不给具体游戏
+  开后门的办法。目录 `AppContext.BaseDirectory\embedded-server`（只读回退 `%LOCALAPPDATA%`）。
+- **收尾顺序：退出房间 → 断自己的连接 → 停服务器**（断连接必须在停服前，否则 Kestrel 优雅停止耗满 5s）。
+  唯一入口 `App.OnExit` + `Interlocked` 幂等；`Closing` 只做**可取消**的二次确认（取消必须完全无损）。
+- **邀请码地址取自 `GameClient.Endpoint`** → 三处地址（自动连接/界面显示/邀请码）必须**同源**；
+  自连回落 127.0.0.1 时用 `GameClient.InviteUrlOverride` 保住分享出去的码仍是局域网地址。
+- **坑**：`TcpListener(IPAddress.Loopback, port)` **不能**模拟端口占用（与绑 0.0.0.0 的 Kestrel 不冲突），
+  测漂移要用真实内置服务器当占用者；清理 target 必须同时挂 `Build;Publish` 且 `$(OutDir)`/`$(PublishDir)`
+  各删一遍，否则 publish 仍脏。
+
 ## 构建与验证
 - `dotnet build WerewolfGame.sln`，**对警告零容忍**（Nullable 开启，必须 0/0）。
 - 测试宿主（`ClientGUI.Tests/bin/Debug/net8.0-windows` 下 `dotnet ClientGUI.Tests.dll`）：
   默认（逻辑/加密/规则/多房间/扩展性）· `--ui` · `--server <url>` · `--rooms` · `--lifecycle`（需小局配置）·
   `--hostinvite` · `--reconnect [秒]` · `--protocol`（需**标准**配置 40/45/45/30、MinPlayers=4）· `--newroles`（需小局）· `--undercover` · `--hold`/`--bots`。
-  基线：默认 **1220** 项（v2.3.3）、UI 冒烟 **64** 项、`--rooms` 63、`--protocol` 44、`--lifecycle` 15。
+  基线：默认 **1350** 项（v2.4.0）、UI 冒烟 **93** 项、`--rooms` 63、`--protocol` 44、`--lifecycle` 15。
+  另有 `--embedded` 32、`--embeddedqa` 50（内置服务器）。
 
 ## 本机环境坑（实测）
 - `.exe`（apphost）跑不起来，一律 `dotnet <dll>`。

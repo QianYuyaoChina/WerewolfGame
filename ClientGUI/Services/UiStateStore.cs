@@ -25,6 +25,13 @@ public sealed class UiState
     public string ServerUrl { get; set; } = "";
     public string Username { get; set; } = "";
 
+    // ---- 登录窗口：内置服务器页记住上次的选择（P1-5） ----
+    /// <summary>内置服务器端口（默认 5000；被占用时会自动漂移，这里记的是「首选端口」）。</summary>
+    public int EmbeddedPort { get; set; } = 5000;
+
+    /// <summary>上次停留的登录标签页：<c>embedded</c> = 创建内置服务器，<c>external</c> = 连接现有服务器。</summary>
+    public string LastLoginTab { get; set; } = "embedded";
+
     // ---- 房间列表：上次进入过的房间号（便于回填 / 提示） ----
     public string LastRoomId { get; set; } = "";
 

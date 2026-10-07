@@ -423,6 +423,17 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
 
     // ==================== 退出房间 ====================
 
+    /// <summary>
+    /// 程序收尾时复用「退出房间」的**同一条**路径（PRD E-10 / Q4-b）：
+    /// 与菜单项唯一的差别是不弹「是否保留房间」——关窗时弹窗会阻塞退出，
+    /// 按默认策略「不保留」处理。菜单里点「退出房间」仍然照旧弹。
+    /// </summary>
+    public Task LeaveRoomForShutdownAsync()
+    {
+        ConfirmKeepRoom = () => false;   // 抑制弹窗；LeaveRoomAsync 开头同步读取它
+        return LeaveRoomAsync();
+    }
+
     private async Task LeaveRoomAsync()
     {
         _heartbeat.Stop();

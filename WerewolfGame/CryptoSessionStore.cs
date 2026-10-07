@@ -29,6 +29,12 @@ public sealed class CryptoSessionStore
     private readonly ConcurrentDictionary<string, SessionCipher> _sessions = new();
     private readonly ConcurrentDictionary<string, PendingSession> _pending = new();
 
+    /// <summary>
+    /// 已建立会话的连接数（即「已连接玩家数」）。
+    /// 供内置服务器在**进程内直接查询**运行信息用 —— 不新增任何协议字段。
+    /// </summary>
+    public int Count => _sessions.Count;
+
     public void Set(string connectionId, SessionCipher cipher) => _sessions[connectionId] = cipher;
 
     public SessionCipher? Get(string connectionId)

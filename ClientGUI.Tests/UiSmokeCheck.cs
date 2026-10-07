@@ -7,9 +7,11 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using ClientGUI.Services;
+using ClientGUI.ViewModels;
 using ClientGUI.Views;
 using ClientGUI.Views.Games;
 using Werewolf.Client.Share;
+using Werewolf.Server;
 
 namespace ClientGUI.Tests;
 
@@ -58,6 +60,7 @@ public static class UiSmokeCheck
 
                 ExerciseMainWindow();
 
+                CheckLoginTabs();
                 CheckSettingsWindow();
                 CheckHostSettingsPollKeepsEdits();
             CheckHostSettingsGameTabs();
@@ -209,6 +212,88 @@ public static class UiSmokeCheck
             if (item is not MenuItem menuItem) continue;
             into.Add(menuItem);
             CollectMenuItems(menuItem, into);
+        }
+    }
+
+    /// <summary>
+    /// v2.4.0：登录窗口改成两个标签页 ——
+    /// ① 默认停在「创建内置服务器」（本次的核心卖点）；
+    /// ② 「连接现有服务器」的控件、默认值与改造前**逐项一致**（默认地址仍是 http://localhost:5000/gamehub）；
+    /// ③ 两个标签页共用一份用户名 / 密码（切页不丢）。
+    /// </summary>
+    private static void CheckLoginTabs()
+    {
+        var window = new LoginWindow();
+        try
+        {
+            var tabs = window.FindName("Tabs") as TabControl;
+            Check.True(tabs != null, "UI：登录窗口使用标签页组织两种登录方式");
+            if (tabs == null) return;
+
+            Check.Equal(2, tabs.Items.Count, "UI：登录窗口共 2 个标签页");
+
+            var headers = tabs.Items.OfType<TabItem>().Select(t => (t.Header?.ToString() ?? "").Trim()).ToList();
+            Check.True(headers[0].Contains("创建内置服务器", StringComparison.Ordinal),
+                "UI：第一个标签页是「创建内置服务器」（" + headers[0] + "）");
+            Check.True(headers[1].Contains("连接现有服务器", StringComparison.Ordinal),
+                "UI：第二个标签页是「连接现有服务器」（" + headers[1] + "）");
+
+            // 默认停留：创建内置服务器（PRD Q7 裁定）
+            var embeddedTab = tabs.Items.OfType<TabItem>().First();
+            Check.True(embeddedTab.IsSelected, "UI：默认停在「创建内置服务器」标签页");
+
+            // Tab1 的运行信息区与两个可复制的地址行
+            Check.True(embeddedTab.FindName("PortInput") is TextBox, "UI：内置服务器页有端口输入框");
+            Check.True(!string.IsNullOrWhiteSpace(window.Embedded.PortText),
+                "UI：内置服务器页端口有默认值（" + window.Embedded.PortText + "）");
+            Check.Equal("5000", window.Embedded.PortText, "UI：内置服务器页默认端口 5000");
+            Check.True(window.Embedded.WorkDirectoryText.EndsWith(
+                           EmbeddedServerPaths.DirectoryName, StringComparison.Ordinal),
+                "UI：内置服务器页展示工作目录（" + window.Embedded.WorkDirectoryText + "）");
+            Check.Equal("—", window.Embedded.LanUrlText, "UI：未启动时局域网地址显示占位符");
+            Check.Equal("未启动", window.Embedded.StateText, "UI：未启动时状态徽章为「未启动」");
+
+            // 启动前：可编辑、可启动、不可停止、内置页的登录不可用
+            Check.True(window.Embedded.CanEditPort, "UI：未启动时端口可编辑");
+            Check.True(window.Embedded.CanStart, "UI：未启动时「启动」可用");
+            Check.False(window.Embedded.CanStop, "UI：未启动时「停止」禁用");
+            Check.False(window.Embedded.CanLogin, "UI：未启动时内置页的登录按钮不可用");
+
+            // 非法端口：启动按钮禁用 + 内联提示，且不抛异常（E-17）
+            window.Embedded.PortText = "abc";
+            Check.False(window.Embedded.IsPortValid, "UI：非数字端口被判为非法");
+            Check.True(window.Embedded.PortError.Length > 0, "UI：非法端口给出内联提示（不弹异常框）");
+            Check.False(window.Embedded.CanStart, "UI：端口非法时启动按钮禁用");
+
+            window.Embedded.PortText = "80";
+            Check.False(window.Embedded.CanStart, "UI：端口越界（<1024）时启动按钮禁用");
+
+            window.Embedded.PortText = "5000";
+            Check.True(window.Embedded.IsPortValid, "UI：合法端口恢复可用");
+            Check.True(window.Embedded.CanStart, "UI：端口改回合法后启动按钮恢复");
+
+            // Tab2：控件与默认值与改造前一致
+            var externalTab = tabs.Items.OfType<TabItem>().Last();
+            Check.Equal(LoginViewModel.DefaultServerUrl, window.Login.ServerUrl,
+                "UI：连接现有服务器页默认地址仍是 http://localhost:5000/gamehub");
+            Check.True(externalTab.FindName("ServerUrlInput") is TextBox, "UI：连接现有服务器页有地址输入框");
+            Check.True(externalTab.FindName("InviteCodeInput") is TextBox, "UI：连接现有服务器页有邀请码输入框");
+            Check.True(externalTab.FindName("UsernameInput") is TextBox, "UI：连接现有服务器页有用户名输入框");
+            Check.True(externalTab.FindName("PasswordInput") is PasswordBox, "UI：连接现有服务器页有密码输入框");
+
+            // 两个标签页共用同一份凭据（切页不丢）
+            window.Login.UsernameInput = "shared-user";
+            Check.Equal("shared-user", window.Login.UsernameInput, "UI：两个标签页共用同一份用户名（切页不丢）");
+
+            // 切页：内置服务器**不会**随切页停止（E-7）
+            tabs.SelectedItem = externalTab;
+            Check.True(externalTab.IsSelected, "UI：可切换到「连接现有服务器」标签页");
+            tabs.SelectedItem = embeddedTab;
+            Check.True(embeddedTab.IsSelected, "UI：可切回「创建内置服务器」标签页");
+        }
+        finally
+        {
+            try { window.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
         }
     }
 

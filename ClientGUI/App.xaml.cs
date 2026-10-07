@@ -27,6 +27,7 @@ namespace ClientGUI
             RegisterGlobalShortcuts();
 
             RegisterExceptionHandlers();
+            SessionEnding += OnSessionEnding;
             ShowLogin();
         }
 
@@ -78,12 +79,30 @@ namespace ClientGUI
         }
 
         /// <summary>
+        /// 程序退出的**唯一收尾入口**（PRD P0-5 / 流程 C）。
+        /// <c>ShutdownMode = OnExplicitShutdown</c> 且 <see cref="RunRoomLoop"/> 结束必调 <c>Shutdown()</c>，
+        /// 因此登录窗口 / 房间列表窗口 / 主窗口三个关闭入口最终都汇聚到这里，一处即可全覆盖。
+        /// </summary>
+        protected override void OnExit(ExitEventArgs e)
+        {
+            AppShutdown.RunWithPump();
+            base.OnExit(e);
+        }
+
+        /// <summary>系统注销 / 关机时同样触发收尾（否则内置服务器会留下孤儿进程）。</summary>
+        private void OnSessionEnding(object sender, SessionEndingCancelEventArgs e)
+            => AppShutdown.RunWithPump();
+
+        /// <summary>
         /// 房间列表 → 主窗口循环：退出房间回到房间列表（连接不拆）；
         /// 关闭任一窗口则退出程序。退出程序前统一释放连接。
         /// 若登录时已通过邀请码直接进房，则跳过房间列表直接进主窗口。
         /// </summary>
         private void RunRoomLoop(GameClient session)
         {
+            // 会话登记进统一收尾：退出房间 → 断开连接 → 停内置服务器都由 AppShutdown 负责。
+            AppShutdown.AttachSession(session);
+
             try
             {
                 while (true)
@@ -101,8 +120,9 @@ namespace ClientGUI
             }
             finally
             {
-                try { session.DisposeAsync().AsTask().Wait(TimeSpan.FromMilliseconds(400)); }
-                catch { /* 忽略关闭异常 */ }
+                // 这里**不能**提前释放连接：否则「退出房间」请求发不出去（PRD E-10）。
+                // 统一交给 AppShutdown（OnExit 也会调，幂等）。
+                AppShutdown.RunWithPump();
             }
 
             Shutdown();

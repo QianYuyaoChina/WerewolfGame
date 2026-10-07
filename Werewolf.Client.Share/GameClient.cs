@@ -98,6 +98,17 @@ public sealed class GameClient : IAsyncDisposable
     /// <summary>当前服务器地址（连接成功后填充）。</summary>
     public string Endpoint { get; private set; } = "";
 
+    /// <summary>
+    /// 生成邀请码时使用的**地址覆盖**。默认 <c>null</c> → 用 <see cref="Endpoint"/>（与现状完全一致）。
+    ///
+    /// 仅在「局域网地址自连失败、回落到 <c>127.0.0.1</c>」时由宿主设为局域网地址：
+    /// 回落只改「我怎么连自己」，分享给好友的邀请码仍应指向局域网地址（E-18）。
+    ///
+    /// 这不是协议改动：不新增 SignalR 方法、不改 <c>Call</c> 契约、不改 <c>Ops</c> 与任何 DTO，
+    /// 邀请码是客户端本地产物，本属性只决定「往码里写哪个字符串」。
+    /// </summary>
+    public string? InviteUrlOverride { get; set; }
+
     public bool IsConnected => _conn?.State == HubConnectionState.Connected;
 
     /// <summary>是否正处于自动重连过程中。</summary>
@@ -442,7 +453,9 @@ public sealed class GameClient : IAsyncDisposable
     public string? CreateInviteCode(string? inviteToken)
         => string.IsNullOrEmpty(_roomId) || string.IsNullOrEmpty(inviteToken)
             ? null
-            : InviteCode.Create(Endpoint, _roomId, inviteToken, _roomName);
+            // 默认用连接地址（现状）；E-18 回落到本机地址时由宿主覆盖为局域网地址，
+            // 保证「分享出去的码」不受「我自己怎么连」的影响。
+            : InviteCode.Create(InviteUrlOverride ?? Endpoint, _roomId, inviteToken, _roomName);
 
     /// <summary>解析邀请码（静态便捷入口，供界面在未连接时预览）。</summary>
     public static bool TryParseInvite(string? code, out InvitePayload? invite, out string error)

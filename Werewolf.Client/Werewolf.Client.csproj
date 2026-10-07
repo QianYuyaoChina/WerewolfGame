@@ -4,8 +4,43 @@
 		<TargetFramework>net8.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
+		<RootNamespace>Werewolf.Client</RootNamespace>
+		<AssemblyName>Werewolf.Client</AssemblyName>
 	</PropertyGroup>
 	<ItemGroup>
 		<ProjectReference Include="..\Werewolf.Client.Share\Werewolf.Client.Share.csproj" />
+		<!-- 内置服务器：客户端进程内直接拉起服务端组合根（宿主能力一律走 EmbeddedServerHost）。 -->
+		<ProjectReference Include="..\WerewolfGame\Werewolf.Server.csproj" />
 	</ItemGroup>
+
+	<!--
+		内置服务器：客户端只是宿主，不该在自己目录里出现服务端的可执行文件、
+		运行配置与随包分发的模板文件（内置服务器用的是 embedded-server\ 工作目录，
+		留着只会误导用户以为改这里生效）。**Werewolf.Server.dll 必须保留**。
+
+		必须同时挂 Build 与 Publish，且 $(OutDir) 与 $(PublishDir) 各删一遍：
+		只挂 Build 的话 `dotnet publish` 出来的发布目录仍然是脏的（E-19）。
+		accounts.json 同样会经 Web SDK 的默认 Content 通配流过来（客户端从不读它），一并清掉。
+	-->
+	<Target Name="DropServerArtifacts" AfterTargets="Build;Publish">
+		<ItemGroup>
+			<_SrvArt Include="$(OutDir)Werewolf.Server.exe" />
+			<_SrvArt Include="$(OutDir)Werewolf.Server.pdb" />
+			<_SrvArt Include="$(OutDir)Werewolf.Server.deps.json" />
+			<_SrvArt Include="$(OutDir)Werewolf.Server.runtimeconfig.json" />
+			<_SrvArt Include="$(OutDir)Werewolf.Server.staticwebassets.endpoints.json" />
+			<_SrvArt Include="$(OutDir)appsettings.json" />
+			<_SrvArt Include="$(OutDir)words.undercover.txt" />
+			<_SrvArt Include="$(OutDir)accounts.json" />
+			<_SrvArt Include="$(PublishDir)Werewolf.Server.exe" />
+			<_SrvArt Include="$(PublishDir)Werewolf.Server.pdb" />
+			<_SrvArt Include="$(PublishDir)Werewolf.Server.deps.json" />
+			<_SrvArt Include="$(PublishDir)Werewolf.Server.runtimeconfig.json" />
+			<_SrvArt Include="$(PublishDir)Werewolf.Server.staticwebassets.endpoints.json" />
+			<_SrvArt Include="$(PublishDir)appsettings.json" />
+			<_SrvArt Include="$(PublishDir)words.undercover.txt" />
+			<_SrvArt Include="$(PublishDir)accounts.json" />
+		</ItemGroup>
+		<Delete Files="@(_SrvArt)" ContinueOnError="true" />
+	</Target>
 </Project>

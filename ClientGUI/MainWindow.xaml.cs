@@ -41,12 +41,20 @@ public partial class MainWindow : Window
 
         Loaded += OnLoaded;
         Closing += OnClosing;
+
+        // 注意：**不能**在 Closed 里注销「退出房间」委托 ——
+        // Closed 早于 AppShutdown 的收尾，注销掉就没人去走「退出房间」了（PRD E-10）。
+        // 委托只在「已主动退出房间」时注销（见 OnClosing），其余情况留给 AppShutdown 用完后自行处理。
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         RestoreUiState();
         _vm.OnLoaded();
+
+        // 把「退出房间」注册进统一收尾：关窗时由 AppShutdown 走同一条离开流程（PRD E-10）。
+        AppShutdown.SetLeaveRoomHandler(_vm.LeaveRoomForShutdownAsync);
+
         ChatView.FocusChatInput();
     }
 
@@ -122,25 +130,33 @@ public partial class MainWindow : Window
     private void OnRoomLeft()
     {
         IsLoggedOut = true;
+
+        // 收尾期（AppShutdown 正在走「退出房间」）不再触发关闭：
+        // 窗口此刻正在关，重复 Close 会打断收尾流程。
+        if (AppShutdown.IsShuttingDown) return;
+
         Dispatcher.BeginInvoke(new Action(Close));
     }
 
-    /// <summary>直接关闭窗口时尽力断开 SignalR 连接（同步等待，超时即放手让进程退出）。</summary>
+    /// <summary>
+    /// 关窗：只负责「记住界面状态」与「必要时弹一次确认」。
+    /// 连接与内置服务器的释放**统一交给 AppShutdown（OnExit）** ——
+    /// 在这里提前拆连接会让「退出房间」请求发不出去（PRD E-10）。
+    /// </summary>
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         // 无论主动退出房间还是直接关窗，都先记住界面状态。
         SaveUiState();
 
-        if (IsLoggedOut) return;   // 退出房间时不拆连接（回到房间列表继续用）
+        if (IsLoggedOut)
+        {
+            // 已经走完「退出房间」：注销委托，收尾时不再重复离开一次。
+            AppShutdown.ClearLeaveRoomHandler();
+            return;
+        }
 
-        try
-        {
-            _vm.DisposeAsync().Wait(TimeSpan.FromMilliseconds(400));
-        }
-        catch
-        {
-            // 关闭阶段的异常无需打扰用户。
-        }
+        // 内置服务器上还有其他玩家时弹一次确认；取消则彻底无损（不退出房间 / 不停服务器 / 不关窗口）。
+        if (!AppShutdown.ConfirmClose(this)) e.Cancel = true;
     }
 
     // ==================== 菜单：游戏 ====================

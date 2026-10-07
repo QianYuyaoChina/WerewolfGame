@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using ClientGUI.Services;
 using ClientGUI.ViewModels;
 using Werewolf.Client.Share;
 
@@ -14,6 +16,9 @@ public partial class RoomListWindow : Window
 {
     private readonly RoomListViewModel _vm;
     private readonly GameClient _session;
+
+    /// <summary>是否已经进房（进房导致的关闭不是「退出程序」，不该弹关窗确认）。</summary>
+    private bool _enteredRoom;
 
     public RoomListWindow(GameClient session)
     {
@@ -39,13 +44,27 @@ public partial class RoomListWindow : Window
             _vm.StartPolling();
             await _vm.RefreshAsync();
         };
+        Closing += OnClosing;
         Closed += (_, _) => _vm.StopPolling();
     }
 
     private void OnRoomEntered()
     {
+        _enteredRoom = true;
         DialogResult = true;
         Close();
+    }
+
+    /// <summary>
+    /// 关窗：内置服务器上还有其他玩家时弹一次确认（取消则彻底无损）。
+    /// 连接与内置服务器的释放统一交给 <see cref="AppShutdown"/>（OnExit）。
+    /// </summary>
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        // 已经进房（DialogResult=true 的关闭）不是“退出程序”，不该弹确认。
+        if (_enteredRoom) return;
+
+        if (!AppShutdown.ConfirmClose(this)) e.Cancel = true;
     }
 
     /// <summary>回车即加入选中房间。</summary>

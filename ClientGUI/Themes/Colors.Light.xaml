@@ -43,4 +43,5 @@
     <SolidColorBrush x:Key="PrivateBrush" Color="#FF9A6A00" />
     <SolidColorBrush x:Key="ErrorBrush" Color="#FFC62828" />
     <SolidColorBrush x:Key="PhaseBrush" Color="#FF6B4FD8" />
+    <SolidColorBrush x:Key="WarnBrush" Color="#FF9A6A00" />
 </ResourceDictionary>

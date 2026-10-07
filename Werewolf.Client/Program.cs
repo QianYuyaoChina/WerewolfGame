@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using Werewolf.Client;
 using Werewolf.Client.Share;
+using Werewolf.Server;
 
 // ---------------- 主程序 ----------------
 class Program
@@ -9,33 +10,53 @@ class Program
     static GameStateDto? _state;
     static GameClient _client = null!;
 
+    /// <summary>内置服务器宿主（本次没开内置服务器时为 null）。</summary>
+    static EmbeddedServerHost? _host;
+
+    /// <summary>收尾的幂等闸：0 = 未执行，1 = 已执行（Ctrl+C 连按只执行一次）。</summary>
+    static int _shutdownState;
+
     /// <summary>启动时若直接粘贴了邀请码，登录完成后用它直接进房（跳过房间列表）。</summary>
     static InvitePayload? _pendingInvite;
 
-    static async Task Main()
+    static async Task Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
         Console.WriteLine("════════════ 狼人杀 ════════════");
 
-        // ① 输入服务器地址（也支持直接粘贴邀请码）
-        Console.Write("请输入服务器地址（默认 http://localhost:5000/gamehub），或直接粘贴邀请码：");
-        string input = Console.ReadLine()?.Trim() ?? "";
-        string url;
-        if (InviteCode.LooksLikeCode(input))
-        {
-            if (!InviteCode.TryParse(input, out var invite, out var inviteError) || invite == null)
-            {
-                Print("❌ 邀请码无效：" + inviteError);
-                return;
-            }
+        // 退出收尾：Ctrl+C / 正常结束 / 未处理异常都走同一套（幂等，连按不重复执行）。
+        RegisterShutdownHooks();
 
-            url = invite.Url;
-            _pendingInvite = invite;
-            Print($"🎟 已识别邀请码：将连接 {url} 并在登录后进入房间 {invite.RoomId}。");
+        // ⓪ 启动方式：内置服务器 / 连接现有服务器（菜单或 --embedded / --server 参数）
+        var start = await EmbeddedServerConsole.ShowStartMenuAsync(args);
+        _host = start.Host;
+
+        // ① 输入服务器地址（也支持直接粘贴邀请码）
+        string url;
+        if (start.SkipAddressPrompt)
+        {
+            url = start.Url;
         }
         else
         {
-            url = string.IsNullOrEmpty(input) ? "http://localhost:5000/gamehub" : input;
+            Console.Write("请输入服务器地址（默认 http://localhost:5000/gamehub），或直接粘贴邀请码：");
+            string input = Console.ReadLine()?.Trim() ?? "";
+            if (InviteCode.LooksLikeCode(input))
+            {
+                if (!InviteCode.TryParse(input, out var invite, out var inviteError) || invite == null)
+                {
+                    Print("❌ 邀请码无效：" + inviteError);
+                    return;
+                }
+
+                url = invite.Url;
+                _pendingInvite = invite;
+                Print($"🎟 已识别邀请码：将连接 {url} 并在登录后进入房间 {invite.RoomId}。");
+            }
+            else
+            {
+                url = string.IsNullOrEmpty(input) ? "http://localhost:5000/gamehub" : input;
+            }
         }
 
         // ② 连接：明文 HTTP 传输，连接后自动用快速幂 DH 协商会话密钥（应用层加密）
@@ -47,17 +68,7 @@ class Program
             RenderState(s);
         };
 
-        try
-        {
-            await _client.ConnectAsync(url);
-            Print($"✅ 已连接服务器：{url}");
-            Print($"🔐 会话密钥已协商（指纹 {_client.SessionKeyFingerprint}），所有消息均已加密。");
-        }
-        catch (Exception ex)
-        {
-            Print("❌ 无法连接服务器：" + ex.Message);
-            return;
-        }
+        if (!await ConnectWithFallbackAsync(start, url)) return;
 
         // ③ 输入用户名 / 密码并登录（首次即注册）；登录只做账号校验，不再直接进房。
         if (!await LoginAsync()) return;
@@ -94,7 +105,96 @@ class Program
             await GameLoopAsync();                    // 进入房间；leave 时返回，继续外层
         }
 
-        await _client.DisposeAsync();
+        await ShutdownAsync();
+    }
+
+    // ==================== 启动方式 / 收尾 ====================
+
+    /// <summary>
+    /// 连接服务器。内置服务器默认用局域网地址连（这样生成的邀请码好友也能用）；
+    /// 局域网地址连不上时**回落一次**本机地址（多网卡环境可能选中不合适的那一张）。
+    /// </summary>
+    private static async Task<bool> ConnectWithFallbackAsync(EmbeddedServerStartResult start, string url)
+    {
+        try
+        {
+            await _client!.ConnectAsync(url);
+            Print($"✅ 已连接服务器：{url}");
+            Print($"🔐 会话密钥已协商（指纹 {_client.SessionKeyFingerprint}），所有消息均已加密。");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            var fallback = start.Info?.LocalUrl ?? "";
+            if (start.Mode != EmbeddedServerStartMode.Embedded
+                || fallback.Length == 0
+                || string.Equals(fallback, url, StringComparison.Ordinal))
+            {
+                Print("❌ 无法连接服务器：" + ex.Message);
+                return false;
+            }
+
+            Print($"⚠️ 局域网地址连不上（{ex.Message}），改用本机地址重试…");
+            try
+            {
+                await _client.DisposeAsync();
+                _client = new GameClient();
+                _client.MessageReceived += m => Print(m);
+                _client.StateReceived += s =>
+                {
+                    _state = s;
+                    RenderState(s);
+                };
+
+                await _client.ConnectAsync(fallback);
+                Print($"✅ 已改用本机地址连接：{fallback}");
+
+                // E-18：回落只改「我怎么连自己」，分享出去的邀请码仍必须是局域网地址 ——
+                // 否则好友拿到码会连到 127.0.0.1（连到他自己电脑上）。
+                var lan = start.Info?.LanUrl ?? "";
+                if (lan.Length > 0)
+                {
+                    _client.InviteUrlOverride = lan;
+                    Print($"   （分享给好友的邀请码仍是局域网地址：{lan}）");
+                }
+                return true;
+            }
+            catch (Exception retryEx)
+            {
+                Print("❌ 无法连接服务器：" + retryEx.Message);
+                return false;
+            }
+        }
+    }
+
+    /// <summary>注册 Ctrl+C 与未处理异常的收尾钩子（与 GUI 的 AppShutdown 同一套语义）。</summary>
+    private static void RegisterShutdownHooks()
+    {
+        Console.CancelKeyPress += (_, e) =>
+        {
+            // 不让默认行为直接终止进程：先走完收尾（退出房间 → 断连接 → 停服务器）再退出。
+            e.Cancel = true;
+            _ = Task.Run(async () =>
+            {
+                try { await ShutdownAsync(); }
+                catch { /* 收尾失败不阻塞退出 */ }
+                Environment.Exit(0);
+            });
+        };
+
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            // 兜底：进程无论如何都要退出，这里只尽力停一次服务器。
+            try { ShutdownAsync().GetAwaiter().GetResult(); }
+            catch { /* 忽略 */ }
+        };
+    }
+
+    /// <summary>统一收尾（幂等）：退出房间 → 断开自己的连接 → 停止内置服务器。</summary>
+    private static async Task ShutdownAsync()
+    {
+        if (Interlocked.CompareExchange(ref _shutdownState, 1, 0) != 0) return;
+        await EmbeddedServerConsole.ShutdownAsync(_client, _host);
     }
 
     // ==================== 登录 ====================

@@ -82,6 +82,16 @@ public sealed class LoginViewModel : ObservableObject
 
     public bool IsLoggedIn { get => _isLoggedIn; private set => Set(ref _isLoggedIn, value); }
 
+    /// <summary>
+    /// 由「内置服务器」页写入共享状态条（人话一行，绝不含异常堆栈）。
+    /// 两个标签页共用底部状态条，因此这里开放一个入口给内置服务器页。
+    /// </summary>
+    public void SetSharedStatus(string text, bool isError = false)
+    {
+        Status = text;
+        ShowError = isError;
+    }
+
     /// <summary>最近一次登录是否失败（用于在界面上把状态文案标红）。</summary>
     public bool ShowError { get => _loginFailed; private set => Set(ref _loginFailed, value); }
 
@@ -127,10 +137,25 @@ public sealed class LoginViewModel : ObservableObject
 
     // ==================== 登录 ====================
 
-    private async Task LoginAsync()
+    /// <summary>
+    /// 用**指定地址**走与 Tab2 完全相同的登录流程（Tab1「启动并进入」复用它，PRD P0-4）。
+    /// 差别只有一处：不把内置服务器的地址写进「上次使用的服务器地址」
+    /// —— Tab2 记住的地址应当保持用户自己填的那个，不该被内置地址覆盖。
+    /// </summary>
+    public async Task LoginWithServerUrlAsync(string url)
+    {
+        ServerUrl = url;
+        await LoginAsync(persistUrl: false);
+    }
+
+    private async Task LoginAsync(bool persistUrl = true)
     {
         IsBusy = true;
-        Status = "正在连接服务器…";
+
+        // 同一时刻只连一个服务器（E-7）：Share 层的 ConnectAsync 会先断开旧连接，
+        // 这里把「切换」明确说出来，避免用户以为还是连着原来那个。
+        var switching = _client.IsConnected;
+        Status = switching ? "已断开当前服务器，正在连接新的服务器…" : "正在连接服务器…";
         try
         {
             var result = await _client.ConnectAndLoginAsync(ServerUrl, UsernameInput, PasswordInput);
@@ -160,7 +185,7 @@ public sealed class LoginViewModel : ObservableObject
             Status = result.Message;
 
             // 登录成功才记住地址与用户名。
-            UiStateStore.State.ServerUrl = ServerUrl;
+            if (persistUrl) UiStateStore.State.ServerUrl = ServerUrl;
             UiStateStore.State.Username = UsernameInput;
             UiStateStore.Save();
 

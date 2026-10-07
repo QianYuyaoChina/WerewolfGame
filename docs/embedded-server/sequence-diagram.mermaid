@@ -1,0 +1,102 @@
+%% ① 创建内置服务器 → 启动 → 自动连上 → 进房间列表
+sequenceDiagram
+    autonumber
+    actor U as 用户（房主）
+    participant W as LoginWindow（Tab1）
+    participant VM as EmbeddedServerViewModel
+    participant SVC as EmbeddedServerService
+    participant H as EmbeddedServerHost
+    participant SB as ServerBootstrap
+    participant K as Kestrel/GameHub（进程内）
+    participant N as GameClient
+    participant LV as LoginViewModel
+
+    U->>W: 默认停在「创建内置服务器」，填用户名/密码，点「启动并进入」
+    W->>VM: StartAndEnterCommand
+    VM->>SVC: StartAsync()（State=启动中）
+    SVC->>H: StartAsync(port=5000, drift=On)
+    H->>H: EmbeddedServerPaths.TryResolve() → workDir（首选/回退/失败）
+    alt 目录不可用
+        H-->>SVC: Ok=false「无法创建服务器目录…」
+        SVC-->>W: State=启动失败 + 红字人话（无异常框）
+    else 目录可用
+        H->>H: Environment.CurrentDirectory = workDir
+        H->>H: ConfigBootstrap.Ensure(workDir) → BootstrapMessages
+        loop 端口 5000 → 5001 … 5100
+            H->>SB: Build(ContentRoot=workDir, Url=http://0.0.0.0:port, 关控制台日志)
+            SB-->>H: WebApplication
+            H->>K: app.StartAsync()
+            alt 失败：IOException + SocketError.AddressAlreadyInUse
+                K-->>H: 绑定失败
+                H->>H: Dispose 该实例 → 换下一端口
+            else 失败：其他 SocketError
+                K-->>H: 绑定失败
+                H-->>SVC: Ok=false「端口 5000 无法绑定（…），请换一个端口」
+            else 成功
+                K-->>H: 已监听
+                H-->>SVC: Ok=true（Port/WorkDirectory/LocalUrl/LanUrl/ConnectUrl）
+            end
+        end
+        SVC-->>VM: State=运行中 + 地址 + 房间/人数
+        VM-->>U: 状态徽章转绿；地址行 http://<lanIp>:<port>/gamehub
+        VM->>LV: LoginWithServerUrlAsync(ConnectUrl)
+        LV->>N: ConnectAndLoginAsync(ConnectUrl=LanUrl, 用户名, 密码)
+        alt 局域网地址自连失败（E-18：防火墙 / 多网卡取错 / 没插网线）
+            N-->>LV: 连接失败
+            LV->>N: 回落 LocalUrl(127.0.0.1) 重试一次
+            N->>N: InviteUrlOverride = LanUrl（邀请码仍是局域网地址）
+            N-->>LV: 连接成功
+            LV-->>U: 「已改用本机地址连接」（分享出去的邀请码不受影响）
+        end
+        N->>K: 握手（Handshake/Confirm）→ Call(join)
+        K-->>N: 登录成功
+        LV-->>W: LoginSucceeded(session)
+        W->>W: 关闭登录窗口 → App 进入房间列表
+        VM-->>U: 「内置服务器已启动，已自动连接」
+    end
+
+%% ② 关窗收尾（含二次确认、超时与强制退出）
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant Win as 任意窗口（主/房间列表/登录）
+    participant SD as AppShutdown
+    participant MW as MainWindow / GameViewModel
+    participant N as GameClient
+    participant SVC as EmbeddedServerService
+    participant H as EmbeddedServerHost
+    participant K as 服务端（内置）
+
+    U->>Win: 关闭窗口 / 退出程序（含 Ctrl+C、退出菜单）
+    Win->>SD: ShouldConfirmClose()？
+    alt 内置服务器运行中 且 已连接玩家数 > 1
+        SD-->>U: 弹一次「还有 N 位玩家，关闭会结束服务器」
+        alt 取消 —— 必须完全无损（P1-4 / PRD §7）
+            U-->>Win: 取消
+            Win->>Win: e.Cancel = true 并立即返回：不退出房间、不停服务器、不关窗口
+        else 确认
+            Win->>Win: 继续关闭
+        end
+    end
+    Win->>SD: RunWithPump()（OnExit / RunRoomLoop finally 触发，幂等）
+    SD->>SD: Interlocked 幂等闸：已执行过则直接返回
+    SD->>SD: 启动 8s 总预算定时器 + Dispatcher.PushFrame
+    alt 已注册离开房间的委托（即在房间里）
+        SD->>MW: LeaveRoomForShutdownAsync()
+        MW->>MW: ConfirmKeepRoom = () => false（不弹「是否保留房间」）
+        MW->>N: GameClient.LeaveRoomAsync(keepRoom:false)   —— 与菜单同一条路径
+        N->>K: Call(leaveroom)
+        K-->>N: 确认离开（广播离开 / 转让房主 / 回收空房）
+        Note over SD,MW: 超过 3s 无响应 → 放弃等待，不重试、不弹框
+    else 不在房间
+        SD->>SD: 跳过
+    end
+    SD->>N: 断开自己的 SignalR 连接（让 Kestrel 能立刻排空）
+    alt 内置服务器运行中
+        SD->>SVC: StopAsync()
+        SVC->>H: StopAsync(5s)
+        H->>K: app.StopAsync(5s) → DisposeAsync
+        Note over SD,H: 超过 5s → 放弃等待，端口交给进程退出回收
+    end
+    SD->>SD: 总预算 8s 到 → frame.Continue = false
+    SD-->>U: 窗口关闭、进程退出（端口已释放、无残留进程）

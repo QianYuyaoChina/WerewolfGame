@@ -17,6 +17,34 @@
     <ProjectReference Include="..\ClientGUI\ClientGUI.csproj" />
     <ProjectReference Include="..\Werewolf.Client.Share\Werewolf.Client.Share.csproj" />
     <ProjectReference Include="..\WerewolfGame\Werewolf.Server.csproj" />
+    <!-- QA 复核：控制台客户端的收尾预算常量也要与 GUI 对齐（两端一致约定） -->
+    <ProjectReference Include="..\Werewolf.Client\Werewolf.Client.csproj" />
   </ItemGroup>
+
+  <!--
+    测试宿主同样经 ProjectReference 拿到服务端的 exe 与随包模板；它不发布，
+    但为了与两个客户端口径一致（E-19），这里挂同一份清理目标。
+  -->
+  <Target Name="DropServerArtifacts" AfterTargets="Build;Publish">
+    <ItemGroup>
+      <_SrvArt Include="$(OutDir)Werewolf.Server.exe" />
+      <_SrvArt Include="$(OutDir)Werewolf.Server.pdb" />
+      <_SrvArt Include="$(OutDir)Werewolf.Server.deps.json" />
+      <_SrvArt Include="$(OutDir)Werewolf.Server.runtimeconfig.json" />
+      <_SrvArt Include="$(OutDir)Werewolf.Server.staticwebassets.endpoints.json" />
+      <_SrvArt Include="$(OutDir)appsettings.json" />
+      <_SrvArt Include="$(OutDir)words.undercover.txt" />
+      <_SrvArt Include="$(OutDir)accounts.json" />
+      <_SrvArt Include="$(PublishDir)Werewolf.Server.exe" />
+      <_SrvArt Include="$(PublishDir)Werewolf.Server.pdb" />
+      <_SrvArt Include="$(PublishDir)Werewolf.Server.deps.json" />
+      <_SrvArt Include="$(PublishDir)Werewolf.Server.runtimeconfig.json" />
+      <_SrvArt Include="$(PublishDir)Werewolf.Server.staticwebassets.endpoints.json" />
+      <_SrvArt Include="$(PublishDir)appsettings.json" />
+      <_SrvArt Include="$(PublishDir)words.undercover.txt" />
+      <_SrvArt Include="$(PublishDir)accounts.json" />
+    </ItemGroup>
+    <Delete Files="@(_SrvArt)" ContinueOnError="true" />
+  </Target>
 
 </Project>

@@ -89,6 +89,31 @@ public static class UndercoverWordBank
 """;
 
     /// <summary>
+    /// 默认词库文件名（相对服务器工作目录）。
+    /// 「对局读取」与「管理员远程编辑」共用这一个常量，杜绝两处路径漂移（架构 D5）。
+    /// </summary>
+    public const string DefaultWordFile = "words.undercover.txt";
+
+    /// <summary>
+    /// 把「数据根目录 + 词库文件名」解析成绝对路径的**唯一**纯函数（架构 D5）。
+    ///
+    /// 对局读取（<see cref="UndercoverGameInstance"/>）与远程编辑（<c>UndercoverWordResource</c>）
+    /// 都必须经由它，否则会出现「编辑改了 A 文件、下一局读的却是 B 文件」。
+    /// </summary>
+    /// <param name="dataRoot">数据根目录（服务器工作目录）。</param>
+    /// <param name="wordFile">词库文件名；空 / 空白 → <see cref="DefaultWordFile"/>。</param>
+    public static string ResolvePath(string dataRoot, string? wordFile)
+    {
+        var file = (wordFile ?? "").Trim();
+        if (file.Length == 0) file = DefaultWordFile;
+
+        if (Path.IsPathRooted(file)) return file;
+
+        var root = (dataRoot ?? "").Trim();
+        return root.Length == 0 ? file : Path.Combine(root, file);
+    }
+
+    /// <summary>
     /// 读取**编译进程序集**的默认词库（源码目录的 <c>words.undercover.txt</c>）；
     /// 资源不存在或读取失败时返回 null（此时回退到 <see cref="SampleContent"/>）。
     /// </summary>

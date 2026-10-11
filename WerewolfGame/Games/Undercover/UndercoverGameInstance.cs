@@ -266,12 +266,13 @@ public sealed class UndercoverGameInstance : IGameInstance
     /// <summary>
     /// 读取词库：优先用工作目录里的文件；缺失时用**程序内置默认词库**生成一份并打印警告。
     /// 工作目录只读（写不进去）时也不至于开不了局——此时直接用内置那份，不落盘。
+    ///
+    /// v2.5.0：路径解析抽到 <see cref="UndercoverWordBank.ResolvePath"/>，
+    /// 与「管理员远程编辑词库」共用同一份解析（否则会出现「编辑改了 A、下一局读 B」）。
     /// </summary>
     private List<UndercoverWordBank.Pair> LoadWordBank()
     {
-        var file = (_rules.WordFile ?? "").Trim();
-        if (file.Length == 0) file = "words.undercover.txt";
-        var path = Path.IsPathRooted(file) ? file : Path.Combine(Directory.GetCurrentDirectory(), file);
+        var path = UndercoverWordBank.ResolvePath(Directory.GetCurrentDirectory(), _rules.WordFile);
 
         var warning = UndercoverWordBank.EnsureSample(path);
         if (warning != null) Console.WriteLine(warning);

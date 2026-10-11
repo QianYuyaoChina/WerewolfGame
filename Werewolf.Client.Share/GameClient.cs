@@ -131,6 +131,18 @@ public sealed class GameClient : IAsyncDisposable
 
     public string Username => _username;
 
+    /// <summary>
+    /// 是否为内置管理员。**只读**：只能由服务端回执写入（<c>join</c> 回执或 <c>Ops.Session</c>），
+    /// 客户端不得自称管理员（PRD 5.3 / 架构 K5）。
+    /// </summary>
+    public bool IsAdmin { get; private set; }
+
+    /// <summary>
+    /// 当前账号的称号。**只读**：只由服务端回执写入，本地不持久化（PRD 4.1 / 架构 K6）。
+    /// 无称号时为 ""。
+    /// </summary>
+    public string Title { get; private set; } = "";
+
     /// <summary>当前所在房间号；不在房间时为空字符串。</summary>
     public string CurrentRoomId => _roomId;
 
@@ -312,8 +324,132 @@ public sealed class GameClient : IAsyncDisposable
             _username = username;
             _password = password;
             _loggedIn = true;
+
+            // 登录回执顺带下发「是否管理员 / 当前称号」（老服务端没有 Payload → 保持默认值）。
+            var ack = reply.Payload?.Deserialize<JoinAckPayload>(JsonOptions);
+            if (ack != null)
+            {
+                IsAdmin = ack.IsAdmin;
+                Title = ack.Title ?? "";
+            }
         }
         return res;
+    }
+
+    // ---------------- 服务器方法：账号身份（v2.5.0） ----------------
+
+    /// <summary>
+    /// 查询自己的会话身份（用户名 / 是否管理员 / 当前称号）。失败或服务端不支持时返回 null。
+    /// </summary>
+    public async Task<SessionInfoDto?> GetSessionAsync()
+    {
+        var reply = await CallAsync(Ops.Session);
+        if (!reply.Ok) return null;
+
+        var dto = reply.Payload?.Deserialize<SessionInfoDto>(JsonOptions);
+        if (dto == null) return null;
+
+        // 与 join 回执同源：会话身份只由服务端写入。
+        IsAdmin = dto.IsAdmin;
+        Title = dto.Title ?? "";
+        return dto;
+    }
+
+    /// <summary>
+    /// 设置 / 清除**自己**的称号（空 / 全空白 = 清除）。
+    /// 请求里不含用户名 —— 服务端一律按会话身份写入（PRD 4.8）。
+    /// </summary>
+    public async Task<(bool ok, string msg)> SetTitleAsync(string title)
+    {
+        var reply = await CallAsync(Ops.SetTitle, Node(new SetTitlePayload { Title = title ?? "" }));
+        if (!reply.Ok)
+            return (false, string.IsNullOrEmpty(reply.Msg) ? ServerMessages.TitleSaved : reply.Msg);
+
+        var ack = reply.Payload?.Deserialize<SetTitleAckPayload>(JsonOptions);
+        Title = ack?.Title ?? "";
+
+        var msg = reply.Msg;
+        if (string.IsNullOrEmpty(msg)) msg = Title.Length == 0 ? ServerMessages.TitleCleared : ServerMessages.TitleSaved;
+        return (true, msg);
+    }
+
+    /// <summary>
+    /// 彩蛋口令。服务端**永远不会**返回错误：未命中也是成功 + 一条占位文案。
+    /// 网络不通 / 服务端不支持时返回 null（调用方按「连不上服务器」提示，不弹异常堆栈）。
+    /// </summary>
+    public async Task<EggReplyPayload?> EggAsync(string code)
+    {
+        var reply = await CallAsync(Ops.Egg, Node(new EggPayload { Code = code ?? "" }));
+        if (!reply.Ok) return null;
+
+        return reply.Payload?.Deserialize<EggReplyPayload>(JsonOptions);
+    }
+
+    // ---------------- 服务器方法：密码与资源（v2.5.0 第 5 / 7 条） ----------------
+
+    /// <summary>
+    /// 修改**自己**的密码（旧密码 + 新密码）。请求里不含用户名 —— 服务端按会话身份处理。
+    /// 成功**不断开**当前连接、不强制重登（PRD 7.4）；失败返回服务端文案。
+    /// </summary>
+    public async Task<(bool ok, string msg)> ChangePasswordAsync(string oldPassword, string newPassword)
+    {
+        var reply = await CallAsync(Ops.ChangePassword, Node(new ChangePasswordPayload
+        {
+            OldPassword = oldPassword ?? "",
+            NewPassword = newPassword ?? ""
+        }));
+
+        if (!reply.Ok)
+            return (false, string.IsNullOrEmpty(reply.Msg) ? ServerMessages.OldPasswordWrong : reply.Msg);
+
+        // 改密码不影响当前会话，但仍把本地记住的密码同步成新的，
+        // 否则「掉线后自动重连」会用旧密码（重连走的是 LoginAsync）。
+        _password = newPassword ?? "";
+        return (true, string.IsNullOrEmpty(reply.Msg) ? ServerMessages.PasswordChanged : reply.Msg);
+    }
+
+    /// <summary>可编辑数据资源清单（**仅管理员**）。非管理员 / 服务端不支持时返回 null。</summary>
+    public async Task<DataResourceListPayload?> ListDataResourcesAsync()
+    {
+        var reply = await CallAsync(Ops.DataResources);
+        if (!reply.Ok) return null;
+        return reply.Payload?.Deserialize<DataResourceListPayload>(JsonOptions);
+    }
+
+    /// <summary>取某个资源全文（**仅管理员**）。失败返回 null。</summary>
+    public async Task<DataResourceContentPayload?> GetDataResourceAsync(string id)
+    {
+        var reply = await CallAsync(Ops.DataResourceGet, Node(new DataResourceRefPayload { Id = id ?? "" }));
+        if (!reply.Ok) return null;
+        return reply.Payload?.Deserialize<DataResourceContentPayload>(JsonOptions);
+    }
+
+    /// <summary>
+    /// 整份提交某个资源（**仅管理员**）。失败也返回结果对象（Ok=false + 人话原因），
+    /// 而不是抛异常 —— 编辑界面只需要就地显示一行提示。
+    /// </summary>
+    public async Task<DataResourceSaveResult> SaveDataResourceAsync(string id, string content, string digest)
+    {
+        var reply = await CallAsync(Ops.DataResourceSave, Node(new DataResourceSavePayload
+        {
+            Id = id ?? "",
+            Content = content ?? "",
+            Digest = digest ?? ""
+        }));
+
+        var result = reply.Payload?.Deserialize<DataResourceSaveResult>(JsonOptions);
+        if (result != null)
+        {
+            if (!reply.Ok) result.Ok = false;
+            if (string.IsNullOrEmpty(result.Message)) result.Message = reply.Msg;
+            return result;
+        }
+
+        return new DataResourceSaveResult
+        {
+            Ok = reply.Ok,
+            Message = reply.Msg
+        };
     }
 
     // ---------------- 服务器方法：房间 ----------------

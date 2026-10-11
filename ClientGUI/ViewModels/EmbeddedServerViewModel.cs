@@ -2,9 +2,35 @@ using System.IO;
 using System.Windows.Input;
 using System.Windows.Threading;
 using ClientGUI.Services;
+using Werewolf.Client.Share;
 using Werewolf.Server;
 
 namespace ClientGUI.ViewModels;
+
+/// <summary>
+/// 「一键开服」的分步状态（v2.5.0 第 6 条 / 架构 D7）。
+/// 任何一步失败都**不回滚已完成的步骤**：服务器起来了就保持运行，按钮恢复可点、可原地重试。
+/// </summary>
+public enum OneClickStep
+{
+    /// <summary>还没点过。</summary>
+    Idle,
+
+    /// <summary>正在启动内置服务器。</summary>
+    Starting,
+
+    /// <summary>服务器已起来，正在连接（局域网优先，失败回落本机一次）。</summary>
+    Connecting,
+
+    /// <summary>已连上，正在用管理员账号登录。</summary>
+    LoggingIn,
+
+    /// <summary>已用管理员登录且服务器运行中 → 主按钮变「进入房间列表」。</summary>
+    Ready,
+
+    /// <summary>某一步失败；<see cref="EmbeddedServerViewModel.FailedAt"/> 记录卡在哪一步。</summary>
+    Failed
+}
 
 /// <summary>
 /// 登录窗口 Tab1「创建内置服务器」的视图模型。
@@ -12,6 +38,10 @@ namespace ClientGUI.ViewModels;
 /// 职责边界：它只做「把 <see cref="EmbeddedServerService"/> 的状态翻译成界面文案 + 按钮可用性」，
 /// 不碰任何 ASP.NET Core API、不自己判断服务器状态（状态由服务单一来源推导）。
 /// 「启动并进入」复用 <see cref="LoginViewModel"/> **完全相同**的登录流程（PRD P0-4）。
+///
+/// v2.5.0 第 6 条：新增「一键开服」状态机 —— 一次点击完成
+/// 「启动服务器 → 连接（局域网优先 / 回落本机）→ 用内置管理员登录」，
+/// 并用**显式凭据**登录，绝不覆盖用户手填的用户名 / 密码（架构 K13）。
 /// </summary>
 public sealed class EmbeddedServerViewModel : ObservableObject
 {
@@ -23,6 +53,9 @@ public sealed class EmbeddedServerViewModel : ObservableObject
 
     private string _portText;
     private string _portError = "";
+    private OneClickStep _step = OneClickStep.Idle;
+    private string _stepText = "";
+    private OneClickStep _failedAt = OneClickStep.Idle;
 
     public EmbeddedServerViewModel(LoginViewModel login)
     {
@@ -35,6 +68,7 @@ public sealed class EmbeddedServerViewModel : ObservableObject
         CopyCommand = new RelayCommand(p => CopyAddress(p as string ?? ""));
         OpenDirectoryCommand = new RelayCommand(_ => OpenDirectory());
         LoginToEmbeddedCommand = new AsyncRelayCommand(_ => LoginToEmbeddedAsync(), _ => CanLogin);
+        OneClickCommand = new AsyncRelayCommand(_ => OneClickAsync(), _ => CanOneClick);
 
         _service.Changed += OnServiceChanged;
         _poll.Tick += (_, _) =>
@@ -146,6 +180,38 @@ public sealed class EmbeddedServerViewModel : ObservableObject
     /// <summary>主按钮文案（启动中显示「启动中…」）。</summary>
     public string StartButtonText => _service.State == EmbeddedServerState.Starting ? "启动中…" : "启动并进入";
 
+    // ==================== 一键开服（v2.5.0 第 6 条） ====================
+
+    /// <summary>当前分步状态（Idle → Starting → Connecting → LoggingIn → Ready / Failed）。</summary>
+    public OneClickStep Step => _step;
+
+    /// <summary>分步状态的**人话**文案（给状态条 / 按钮下方那行小字用）。</summary>
+    public string StepText => _stepText;
+
+    /// <summary>失败时卡在哪一步（未失败时为 <see cref="OneClickStep.Idle"/>）。</summary>
+    public OneClickStep FailedAt => _failedAt;
+
+    /// <summary>
+    /// 是否已「开好服并登上管理员」：已用管理员登录 **且** 服务器运行中。
+    /// 为 true 时主按钮切成「进入房间列表」。
+    /// </summary>
+    public bool IsOneClickDone => _login.IsLoggedIn && _service.IsRunning;
+
+    /// <summary>「一键开服 / 进入房间列表」是否可点。</summary>
+    public bool CanOneClick => IsOneClickDone
+                               || (IsPortValid && !_service.IsBusy && !_login.IsBusy);
+
+    /// <summary>主按钮文案：就绪后切「进入房间列表」，启动中显示「启动中…」，其余为「一键开服」。</summary>
+    public string MainButtonText => IsOneClickDone
+        ? "进入房间列表"
+        : _service.State == EmbeddedServerState.Starting ? "启动中…" : "一键开服";
+
+    /// <summary>主按钮下方那行小字：**明文**说明会用谁登录（PRD 6.6，不让用户蒙在鼓里）。</summary>
+    public string OneClickHint => AdminDefaults.OneClickLoginHint;
+
+    /// <summary>是否显示「一键开服」的分步文案（未点过时为 false，界面保持干净）。</summary>
+    public bool HasStepText => _stepText.Length > 0;
+
     // ==================== 命令 ====================
 
     public AsyncRelayCommand StartAndEnterCommand { get; }
@@ -155,7 +221,67 @@ public sealed class EmbeddedServerViewModel : ObservableObject
     public RelayCommand OpenDirectoryCommand { get; }
     public AsyncRelayCommand LoginToEmbeddedCommand { get; }
 
+    /// <summary>「一键开服」/「进入房间列表」主按钮（v2.5.0 第 6 条）。</summary>
+    public AsyncRelayCommand OneClickCommand { get; }
+
     // ==================== 行为 ====================
+
+    /// <summary>
+    /// 一键开服：启动服务器 → 连接（局域网优先，失败回落本机一次）→ 用内置管理员登录。
+    ///
+    /// 三条与普通登录不同的地方：
+    /// <list type="bullet">
+    ///   <item>用**显式凭据**登录（admin + 默认密码），不写用户手填的用户名 / 密码（K13）；</item>
+    ///   <item>成功后**自动进入房间列表**：到达就绪态后紧接着调用 <see cref="LoginViewModel.EnterRoomList"/>，
+    ///         点一次就落到房间列表；按钮仍会切成「进入房间列表」，再点一次同样能进（幂等兜底分支保留）；</item>
+    ///   <item>任一步失败都**不回滚**：服务器起来了就保持运行，按钮恢复可点，可原地重试（此时**不进入**）。</item>
+    /// </list>
+    /// </summary>
+    private async Task OneClickAsync()
+    {
+        // 已就绪 → 这一次点击的含义是「进入房间列表」。
+        if (IsOneClickDone)
+        {
+            _login.EnterRoomList();
+            return;
+        }
+
+        SetStep(OneClickStep.Starting, "① 正在启动内置服务器…");
+
+        var info = await StartAsync();
+        if (!info.Ok)
+        {
+            // 停在①：服务器没起来，等用户改端口后重试。
+            SetStep(OneClickStep.Failed, "① 启动失败：" + info.ErrorMessage, OneClickStep.Starting);
+            return;
+        }
+
+        // 端口漂移直接显示成状态文案（PRD E-16：界面显示的端口就是实际端口）。
+        var started = _service.DriftNote.Length > 0
+            ? $"已启动（{_service.DriftNote}），正在连接…"
+            : $"已启动（端口 {info.Port}），正在连接…";
+        SetStep(OneClickStep.Connecting, "② " + started);
+
+        SetStep(OneClickStep.LoggingIn, "③ 正在用管理员 " + AdminDefaults.Username + " 登录…");
+
+        var ok = await _login.ConnectWithFallbackAsync(
+            info.ConnectUrl, info.LocalUrl, info.LanUrl,
+            AdminDefaults.Username, AdminDefaults.DefaultAdminPassword);
+
+        if (!ok)
+        {
+            // 停在② / ③：**服务器保持运行**（不 StopAsync），连接与服务器都留给用户重试。
+            SetStep(OneClickStep.Failed, "登录失败（服务器仍在运行）：" + _login.Status, OneClickStep.LoggingIn);
+            return;
+        }
+
+        SetStep(OneClickStep.Ready, $"已登录：{_login.Session.Username}（管理员），正在进入房间列表…");
+
+        // 收尾轮（用户裁定）：点一次就落到房间列表 —— 到达就绪态后紧接着复用同一条进入路径
+        // （EnterRoomList → LoginSucceeded → 登录窗口 OnLoginSucceeded 打开房间列表）。
+        // 注意：所有失败分支在此**之前**都已 return，所以「任一步失败都不进入」的语义不受影响。
+        _login.EnterRoomList();
+    }
 
     /// <summary>启动 → 自动连接（实际端口，含 /gamehub）→ 用当前凭据登录。</summary>
     private async Task StartAndEnterAsync()
@@ -243,6 +369,22 @@ public sealed class EmbeddedServerViewModel : ObservableObject
         _service.SetStatusOverride("无法打开服务器目录：" + directory);
     }
 
+    /// <summary>记录分步状态并通知界面（<paramref name="failedAt"/> 只在失败时才有意义）。</summary>
+    private void SetStep(OneClickStep step, string text, OneClickStep failedAt = OneClickStep.Idle)
+    {
+        _step = step;
+        _failedAt = step == OneClickStep.Failed ? failedAt : OneClickStep.Idle;
+        _stepText = text ?? "";
+
+        OnPropertyChanged(nameof(Step));
+        OnPropertyChanged(nameof(StepText));
+        OnPropertyChanged(nameof(HasStepText));
+        OnPropertyChanged(nameof(FailedAt));
+        OnPropertyChanged(nameof(IsOneClickDone));
+        OnPropertyChanged(nameof(CanOneClick));
+        OnPropertyChanged(nameof(MainButtonText));
+    }
+
     /// <summary>停止运行信息的轮询并退订服务事件（窗口关闭时调用，避免留下悬挂引用）。</summary>
     public void StopPolling()
     {
@@ -295,6 +437,13 @@ public sealed class EmbeddedServerViewModel : ObservableObject
         OnPropertyChanged(nameof(CanEditPort));
         OnPropertyChanged(nameof(CanLogin));
         OnPropertyChanged(nameof(StartButtonText));
+
+        // 一键开服的可点性 / 文案也跟着服务器状态变（服务器停了就不算「就绪」）。
+        if (_step == OneClickStep.Ready && !IsOneClickDone) SetStep(OneClickStep.Idle, "");
+
+        OnPropertyChanged(nameof(IsOneClickDone));
+        OnPropertyChanged(nameof(CanOneClick));
+        OnPropertyChanged(nameof(MainButtonText));
 
         // 把状态同步到共享状态条（人话，无堆栈）。
         _login.SetSharedStatus(_service.StatusText, _service.State == EmbeddedServerState.Failed);

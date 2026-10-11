@@ -257,6 +257,47 @@ public static class EmbeddedServerProbe
             }
         }
 
+        // ---------- 2b. 内置管理员：默认密码必须能登录（v2.5.0 第 5 条 · 用户裁定 #2） ----------
+        // 管理员是**真正的登录账户**：「保留用户名」只挡注册路径（别人抢注 admin），
+        // 登录路径绝不复用这条拦截 —— 否则 admin 会被自己人挡在门外。
+        GameClient? adminClient = null;
+        try
+        {
+            adminClient = new GameClient();
+            await adminClient.ConnectAsync(info.ConnectUrl);
+            var adminLogin = await adminClient.LoginAsync(AdminDefaults.Username, AdminDefaults.DefaultAdminPassword);
+
+            Check.True(adminLogin.ok,
+                "内置服务器：内置管理员 admin + 默认密码能登录成功（用户裁定 #2：" + adminLogin.msg + "）");
+            Check.True(adminClient.IsAdmin, "内置服务器：管理员登录后 IsAdmin == true（服务端回执写入）");
+            Check.True(adminClient.IsLoggedIn, "内置服务器：管理员已登录（IsLoggedIn）");
+            if (adminLogin.ok) Pass("内置管理员 admin + 默认密码登录成功（管理员是真账号）");
+
+            // 密码错的管理员登录必须被拒（证明走的是校验、不是放行）。
+            var wrong = new GameClient();
+            try
+            {
+                await wrong.ConnectAsync(info.ConnectUrl);
+                var badLogin = await wrong.LoginAsync(AdminDefaults.Username, "definitely-wrong-password");
+                Check.False(badLogin.ok, "内置服务器：管理员密码错误时被拒（不是无条件放行）");
+            }
+            finally
+            {
+                try { await wrong.DisposeAsync(); } catch { /* 忽略 */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            Fail("管理员登录复核异常：" + ex.Message);
+        }
+        finally
+        {
+            if (adminClient != null)
+            {
+                try { await adminClient.DisposeAsync(); } catch { /* 忽略 */ }
+            }
+        }
+
         // ---------- 3. 停止 → 端口必须被释放 ----------
         await host.StopAsync(TimeSpan.FromSeconds(5));
         Check.False(host.IsRunning, "内置服务器：停止后不再处于运行态");

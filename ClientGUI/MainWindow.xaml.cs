@@ -19,8 +19,21 @@ public partial class MainWindow : Window
     private readonly GameViewModel _vm;
     private readonly GameClient _session;
 
+    /// <summary>
+    /// 本窗口持有的会话（已登录）。设置窗口据此决定是否显示「修改密码 / 服务器设置」入口
+    /// （v2.5.0 第 5 / 7 条）——只读，不暴露可修改的通道。
+    /// </summary>
+    public GameClient Session => _session;
+
     /// <summary>是否为“主动退出房间”导致的关闭（区别于直接关窗退出程序）。</summary>
     public bool IsLoggedOut { get; private set; }
+
+    /// <summary>
+    /// 是否已经发起「退出程序」（菜单项 / Ctrl+Q）。
+    /// 它决定 <see cref="OnClosing"/> 里这次关闭属于 <see cref="CloseIntentSource.ExitProgram"/>：
+    /// 那时必须放行关闭，否则 <c>Application.Shutdown()</c> 会被这次 Cancel 卡住。
+    /// </summary>
+    private static bool _exitRequested;
 
     public MainWindow(GameClient session)
     {
@@ -139,9 +152,19 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 关窗：只负责「记住界面状态」与「必要时弹一次确认」。
-    /// 连接与内置服务器的释放**统一交给 AppShutdown（OnExit）** ——
-    /// 在这里提前拆连接会让「退出房间」请求发不出去（PRD E-10）。
+    /// 关窗：PRD 第 8 条 —— **点 × 等同于按下「退出房间」**。
+    ///
+    /// 行为表（与 <see cref="CloseIntent"/> 同源，改行为时两处一起改）：
+    /// <list type="bullet">
+    ///   <item>已经走完「退出房间」→ 放行关闭（注销收尾委托，避免重复离开一次）；</item>
+    ///   <item>正在做完整收尾（关房间列表 / 退出程序 / 系统关机）→ 放行关闭；</item>
+    ///   <item>其余情况 → **先取消这次关闭**，再走与菜单「退出房间」**完全同一条**命令
+    ///         （<see cref="GameViewModel.DisconnectCommand"/>），含房主的「是否保留房间」询问。</item>
+    /// </list>
+    ///
+    /// 这里**不再**调用 <c>AppShutdown.ConfirmClose</c>：关主窗口不停服务器、不拆连接，
+    /// 因此「会断开他们」的确认没有意义（PRD 8.7）。完整收尾仍只在
+    /// 「关房间列表 / 退出程序 / 系统关机」时由 <see cref="AppShutdown"/> 执行（三步幂等 + 8s 预算）。
     /// </summary>
     private void OnClosing(object? sender, CancelEventArgs e)
     {
@@ -155,9 +178,26 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 内置服务器上还有其他玩家时弹一次确认；取消则彻底无损（不退出房间 / 不停服务器 / 不关窗口）。
-        if (!AppShutdown.ConfirmClose(this)) e.Cancel = true;
+        // 收尾期（AppShutdown 正在走完整三步）不再拦：放行让窗口关掉，不重复触发离开。
+        if (AppShutdown.IsShuttingDown) return;
+
+        // 关窗来源：菜单「退出程序」/ Ctrl+Q 属于 ExitProgram（要完整收尾，因此放行关闭）；
+        // 点窗口右上角 × 属于 RoomWindow（只退出房间，因此拦下来走「退出房间」）。
+        var source = _exitRequested ? CloseIntentSource.ExitProgram : CloseIntentSource.RoomWindow;
+        if (CloseIntent.RequiresFullShutdown(source) || !HasRoomToLeave()) return;
+
+        e.Cancel = true;
+
+        // 异步执行：不能在 Closing 里同步等待——「退出房间」的回调要回 UI 线程。
+        // AsyncRelayCommand 自带「执行期间禁用」的闸，连点 × 不会重复离开。
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_vm.DisconnectCommand.CanExecute(null)) _vm.DisconnectCommand.Execute(null);
+        }));
     }
+
+    /// <summary>当前是否真的在一个房间里（有可退的东西）。</summary>
+    private bool HasRoomToLeave() => _vm.IsJoined || _session.IsJoined;
 
     // ==================== 菜单：游戏 ====================
 
@@ -295,6 +335,19 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>关闭全部窗口退出程序（Shutdown 会触发 <see cref="OnClosing"/> 断开连接）。</summary>
-    private static void RequestExit() => Application.Current.Shutdown();
+    /// <summary>
+    /// 关闭全部窗口退出程序。
+    ///
+    /// **必须先置位 <see cref="_exitRequested"/>**：<c>Shutdown()</c> 会走到 <see cref="OnClosing"/>，
+    /// 而主窗口的 × 已经被改成「等同于退出房间」（<c>e.Cancel = true</c>）。
+    /// 不置位的话这次关闭会被判成 <see cref="CloseIntentSource.RoomWindow"/> 而被拦下，
+    /// 于是 <c>Application.Shutdown()</c> 永远关不掉窗口、程序退不出去。
+    /// 置位后归为 <see cref="CloseIntentSource.ExitProgram"/> → 放行关闭，
+    /// 由 <see cref="AppShutdown"/> 统一走「退房间 → 断连 → 停服务器」的完整收尾。
+    /// </summary>
+    private static void RequestExit()
+    {
+        _exitRequested = true;
+        Application.Current.Shutdown();
+    }
 }

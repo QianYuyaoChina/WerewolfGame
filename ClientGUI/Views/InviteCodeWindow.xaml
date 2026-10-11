@@ -1,6 +1,10 @@
 <!--
     注意：窗口根元素上的 Foreground/Background 必须用 DynamicResource。
     静态资源在解析这两个属性时还看不到本元素下面声明的 Resources。
+
+    v2.5.0 小程序骨架：导航栏 56（居中标题）+ 灰底上的白色卡片内容区 + 通栏底部主按钮。
+    本窗口依然是 Window 子类（结构契约 S1：冒烟会按 new InviteCodeWindow(string) 实例化），
+    只是外观改成小程序页面；新增的对话框一律改用页面内浮层 OverlayDialog。
 -->
 <Window x:Class="ClientGUI.Views.InviteCodeWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -9,11 +13,11 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         mc:Ignorable="d"
         Title="房间邀请码"
-        Height="396" Width="508"
+        Height="440" Width="508"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource BgBrush}"
+        Background="{DynamicResource PageBgBrush}"
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         UseLayoutRounding="True"
@@ -27,57 +31,55 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid Margin="26,22">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />  <!-- 标题 -->
-            <RowDefinition Height="Auto" />  <!-- 说明 -->
-            <RowDefinition Height="Auto" />  <!-- 邀请码（可选中） -->
-            <RowDefinition Height="Auto" />  <!-- 复制状态 -->
-            <RowDefinition Height="*" />     <!-- 用法 -->
-            <RowDefinition Height="Auto" />  <!-- 按钮 -->
+            <RowDefinition Height="Auto" />  <!-- 导航栏 -->
+            <RowDefinition Height="*" />     <!-- 卡片内容区 -->
+            <RowDefinition Height="Auto" />  <!-- 底部操作条 -->
         </Grid.RowDefinitions>
 
-        <!-- ═══════════════ 标题 ═══════════════ -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal">
-            <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource CardBrush}"
-                    VerticalAlignment="Center">
-                <TextBlock Text="🎟" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="房间邀请码" FontSize="17" FontWeight="Bold"
-                           Foreground="{DynamicResource TextBrush}" />
-                <TextBlock Text="好友粘贴后可直接进入本房间，无需再输房间密码。" FontSize="12" Margin="0,4,0,0"
-                           Foreground="{DynamicResource MutedBrush}" />
+        <!-- ═══════════════ 导航栏 ═══════════════ -->
+        <Border x:Name="NavBar" Grid.Row="0" Style="{StaticResource NavBarPanel}">
+            <TextBlock x:Name="NavTitleText" Text="房间邀请码" Style="{StaticResource NavTitleText}" />
+        </Border>
+
+        <!-- ═══════════════ 内容区 ═══════════════ -->
+        <ScrollViewer Grid.Row="1" Style="{StaticResource PageScroll}" Margin="12,12,12,0">
+            <StackPanel>
+                <Border Style="{StaticResource CardPanel}">
+                    <StackPanel>
+                        <TextBlock Text="好友粘贴后可直接进入本房间，无需再输房间密码。"
+                                   Style="{StaticResource MinorText}" Margin="0,0,0,12" />
+
+                        <TextBlock Text="邀请码（只读，可选中复制）" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="CodeBox" Style="{StaticResource FlatTextBox}"
+                                 IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto" Height="96" Padding="10,8"
+                                 FontFamily="Consolas, Microsoft YaHei UI" FontSize="12" />
+
+                        <TextBlock Text="邀请码已加密，内含服务器地址、房间号与房间密码；请只发给可信的人。"
+                                   Style="{StaticResource FieldHint}" Margin="0,12,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardPanel}">
+                    <StackPanel>
+                        <TextBlock x:Name="StatusText" Style="{StaticResource MinorText}" />
+                        <TextBlock Style="{StaticResource FootnoteText}" Margin="0,12,0,0"
+                                   Text="对方怎么用：打开客户端 → 登录窗口的「邀请码」框（或房间列表的邀请码框）粘贴本码 → 点「使用 / 加入」即可直接进房。&#x0a;复制不了时：在上方框内点击 → Ctrl+A 全选 → Ctrl+C 复制。" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
-        </StackPanel>
+        </ScrollViewer>
 
-        <!-- ═══════════════ 说明 ═══════════════ -->
-        <TextBlock Grid.Row="1" Margin="0,16,0,8" FontSize="12" TextWrapping="Wrap"
-                   Foreground="{DynamicResource MutedBrush}"
-                   Text="邀请码已加密，内含服务器地址、房间号与房间密码；请只发给可信的人。" />
-
-        <!-- ═══════════════ 邀请码（只读但可选中复制） ═══════════════ -->
-        <TextBox x:Name="CodeBox" Grid.Row="2"
-                 Style="{StaticResource FlatTextBox}"
-                 IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
-                 VerticalScrollBarVisibility="Auto" Height="96" Padding="10,8"
-                 FontFamily="Consolas, Microsoft YaHei UI" FontSize="12" />
-
-        <!-- ═══════════════ 复制状态 ═══════════════ -->
-        <TextBlock x:Name="StatusText" Grid.Row="3" Margin="0,10,0,0" FontSize="11.5"
-                   TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
-
-        <!-- ═══════════════ 用法 ═══════════════ -->
-        <TextBlock Grid.Row="4" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap" LineHeight="18"
-                   VerticalAlignment="Top" Foreground="{DynamicResource FaintBrush}"
-                   Text="对方怎么用：打开客户端 → 登录窗口的「邀请码」框（或房间列表的邀请码框）粘贴本码 → 点「使用 / 加入」即可直接进房。&#x0a;复制不了时：在上方框内点击 → Ctrl+A 全选 → Ctrl+C 复制。" />
-
-        <!-- ═══════════════ 按钮 ═══════════════ -->
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button Content="关闭" Style="{StaticResource FlatButton}" Padding="18,8" Margin="0,0,10,0"
-                    Click="Close_OnClick" />
-            <Button Content="复制邀请码" Style="{StaticResource PrimaryButton}" Padding="18,8"
-                    Click="Copy_OnClick" />
-        </StackPanel>
+        <!-- ═══════════════ 底部操作条 ═══════════════ -->
+        <Border Grid.Row="2" Style="{StaticResource FooterBar}">
+            <StackPanel>
+                <Button x:Name="PrimaryAction" Content="复制邀请码" Style="{StaticResource BlockPrimaryButton}"
+                        Click="Copy_OnClick" />
+                <Button Content="关闭" Style="{StaticResource BlockSecondaryButton}" Margin="0,8,0,0"
+                        Click="Close_OnClick" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

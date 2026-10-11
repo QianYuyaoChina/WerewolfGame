@@ -147,6 +147,22 @@ if (hostInviteIndex >= 0)
     return hostInvite.Ok ? 0 : 1;
 }
 
+// 彩蛋 + 称号的协议级端到端探针：--egg [url]
+var eggIndex = Array.IndexOf(args, "--egg");
+if (eggIndex >= 0)
+{
+    var url = eggIndex + 1 < args.Length && !args[eggIndex + 1].StartsWith("--", StringComparison.Ordinal)
+        ? args[eggIndex + 1]
+        : DefaultUrl;
+    Console.WriteLine($"════════ 彩蛋 / 称号 端到端探针（{url}） ════════");
+    var egg = await TitleEggProbe.RunAsync(url);
+    Console.WriteLine();
+    foreach (var note in egg.Notes) Console.WriteLine("   " + note);
+    Console.WriteLine();
+    Console.WriteLine(egg.Ok ? "✅ 通过" : "❌ 存在问题");
+    return egg.Ok ? 0 : 1;
+}
+
 // 内置服务器端到端自检：--embedded（进程内起服，不依赖外部服务端）
 if (Array.IndexOf(args, "--embedded") >= 0)
 {
@@ -223,6 +239,16 @@ EmbeddedServerProbe.RunLogicChecks();
 
 Console.WriteLine("════════ 内置服务器：QA 独立复核（纯逻辑） ════════");
 EmbeddedServerQaAudit.RunLogicChecks();
+
+// v2.5.0 B4 / B5 的能力探针（内置管理员 / 可编辑资源 / 修改密码 / 一键开服 / 导航居中）。
+V25BatchProbe.RunLogicChecks();
+
+Console.WriteLine();
+AppShellQaGuard.RunDocsAndSourceGuards();
+
+// v2.5.0 B2 / B3 的纯逻辑守护：关闭意图表 / 彩蛋计数 / 称号校验（不需要 WPF 上下文）。
+Console.WriteLine();
+AppShellGuard.RunLogicGuards();
 
 Console.WriteLine();
 if (Check.FailureList.Count == 0)

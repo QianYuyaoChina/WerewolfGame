@@ -1,11 +1,17 @@
 <!--
     注意：窗口根元素上的 Foreground/Background 必须用 DynamicResource。
-    静态资源在解析这两个属性时还看不到本元素下面声明的 Resources（主窗口同理）。
+    静态资源在解析这两个属性时还看不到本元素下面声明的 Resources。
 
     本窗口在 v2.4.0 重写为两个标签页：
-      Tab1「创建内置服务器」—— 在这台电脑上直接开一个服务器（本次新增的卖点，默认停留）
+      Tab1「创建内置服务器」—— 在这台电脑上直接开一个服务器（默认停留）
       Tab2「连接现有服务器」—— 控件、默认值、邀请码逻辑与改造前逐项一致
     两个标签页共享用户名 / 密码与底部状态条（切页不丢输入）。
+
+    v2.5.0：改为小程序页面骨架 —— 导航栏 56（居中标题）+ 灰底上的白色卡片内容区 + 底部操作条。
+    结构契约（UiSmokeCheck）必须保留：
+      · Tabs（TabControl，2 页，页头依次含「创建内置服务器」「连接现有服务器」，默认选中第 1 页）；
+      · PortInput / ServerUrlInput / InviteCodeInput / UsernameInput / PasswordInput 五个命名输入框；
+      · 页头必须是**字符串**（冒烟用例按 Header 文本比对）。
 -->
 <Window x:Class="ClientGUI.Views.LoginWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -18,7 +24,7 @@
         Height="792" Width="470"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource BgBrush}"
+        Background="{DynamicResource PageBgBrush}"
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         UseLayoutRounding="True"
@@ -33,274 +39,254 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid Margin="28,22">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <!-- 标题 -->
-            <RowDefinition Height="*" />
-            <!-- 标签页 -->
-            <RowDefinition Height="Auto" />
-            <!-- 状态条 -->
-            <RowDefinition Height="Auto" />
-            <!-- 底部提示 -->
+            <RowDefinition Height="Auto" />  <!-- 导航栏 -->
+            <RowDefinition Height="*" />     <!-- 卡片内容区 -->
+            <RowDefinition Height="Auto" />  <!-- 底部操作条（状态） -->
         </Grid.RowDefinitions>
 
-        <!-- ═══════════════ 标题 + 右上角设置 ═══════════════ -->
-        <Grid Grid.Row="0" Margin="0,0,0,18">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                <TextBlock Text="🐺" FontSize="26" VerticalAlignment="Center" />
-                <TextBlock Text="狼人杀" FontSize="22" FontWeight="Bold" Margin="10,0,0,0"
-                           VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
-            </StackPanel>
-            <TextBlock Text="开服务器或直接加入" FontSize="12" Margin="132,33,0,-26"
-                       HorizontalAlignment="Left" Foreground="{DynamicResource MutedBrush}" />
+        <!-- ═══════════════ 导航栏（*|Auto|* 三列：标题几何居中于整条导航栏） ═══════════════ -->
+        <Border x:Name="NavBar" Grid.Row="0" Style="{StaticResource NavBarPanel}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-            <!-- 设置入口统一放右上角（与主窗口、房间列表一致） -->
-            <Button Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="12,6"
-                    HorizontalAlignment="Right" VerticalAlignment="Top"
-                    Click="Settings_OnClick" ToolTip="外观主题等设置（快捷键 Ctrl + ,）" />
-        </Grid>
+                <TextBlock Grid.Column="1" x:Name="NavTitleText" Text="狼人杀" Style="{StaticResource NavTitleText}" />
+                <Button Grid.Column="2" Content="设置" Style="{StaticResource NavIconButton}" HorizontalAlignment="Right"
+                        Click="Settings_OnClick" ToolTip="外观主题等设置（快捷键 Ctrl + ,）" />
+            </Grid>
+        </Border>
 
-        <!-- ═══════════════ 两个标签页 ═══════════════ -->
-        <TabControl x:Name="Tabs" Grid.Row="1"
-                    Style="{StaticResource FlatTabControl}"
-                    SelectionChanged="Tabs_OnSelectionChanged">
+        <!-- ═══════════════ 内容区 ═══════════════ -->
+        <ScrollViewer Grid.Row="1" Style="{StaticResource PageScroll}" Margin="12,12,12,0">
+            <StackPanel>
 
-            <!-- ─────────── Tab 1：创建内置服务器 ─────────── -->
-            <TabItem x:Name="EmbeddedTab" Header="🖥 创建内置服务器"
-                     DataContext="{Binding Embedded, RelativeSource={RelativeSource AncestorType=Window}}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                              Padding="0,0,4,0">
-                    <StackPanel Margin="0,2,0,0">
+                <Border Style="{StaticResource CardPanel}">
+                    <TabControl x:Name="Tabs" Style="{StaticResource FlatTabControl}"
+                                SelectionChanged="Tabs_OnSelectionChanged">
 
-                        <!-- 端口 -->
-                        <TextBlock Text="端口" Style="{StaticResource MutedText}" Margin="0,0,0,6" />
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="110" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="PortInput" Grid.Column="0"
-                                     Style="{StaticResource FlatTextBox}"
-                                     Text="{Binding PortText, UpdateSourceTrigger=PropertyChanged}"
-                                     IsEnabled="{Binding CanEditPort}"
-                                     MaxLength="5" />
-                            <CheckBox Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center"
-                                      Content="被占用时自动换一个空闲端口"
-                                      IsChecked="{Binding AllowPortDrift}"
-                                      IsEnabled="{Binding CanEditPort}"
-                                      Foreground="{DynamicResource TextSoftBrush}"
-                                      FontSize="12" />
-                        </Grid>
-                        <TextBlock Text="{Binding PortError}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource ErrorBrush}"
-                                   Visibility="{Binding IsPortValid, Converter={StaticResource InverseBoolToVisibility}}" />
+                        <!-- ─────────── Tab 1：创建内置服务器 ─────────── -->
+                        <TabItem x:Name="EmbeddedTab" Header="创建内置服务器"
+                                 DataContext="{Binding Embedded, RelativeSource={RelativeSource AncestorType=Window}}">
+                            <StackPanel Margin="0,4,0,0">
 
-                        <!-- 三个按钮 -->
-                        <Grid Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Style="{StaticResource PrimaryButton}"
-                                    Padding="18,9" Height="40"
-                                    Content="{Binding StartButtonText}"
-                                    Command="{Binding StartAndEnterCommand}"
-                                    ToolTip="启动内置服务器 → 自动连接 → 用下面的账号登录" />
-                            <Button Grid.Column="1" Style="{StaticResource FlatButton}"
-                                    Padding="14,9" Height="40" Margin="8,0,0,0"
-                                    Content="仅启动服务器"
-                                    Command="{Binding StartOnlyCommand}"
-                                    ToolTip="只开服务器并给出可分享地址，自己先不进" />
-                            <Button Grid.Column="3" Style="{StaticResource DangerButton}"
-                                    Padding="14,9" Height="40"
-                                    Content="停止"
-                                    Command="{Binding StopCommand}" />
-                        </Grid>
-
-                        <!-- 运行信息 -->
-                        <Border Margin="0,14,0,0" Padding="12,10" CornerRadius="7"
-                                Background="{DynamicResource CardBrush}">
-                            <StackPanel>
-                                <!-- 状态徽章 -->
-                                <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="9" Height="9" Margin="0,0,7,0" VerticalAlignment="Center">
-                                        <Ellipse.Style>
-                                            <Style TargetType="Ellipse">
-                                                <Setter Property="Fill" Value="{DynamicResource MutedBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding State}" Value="Starting">
-                                                        <Setter Property="Fill" Value="{DynamicResource WarnBrush}" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding State}" Value="Stopping">
-                                                        <Setter Property="Fill" Value="{DynamicResource WarnBrush}" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding State}" Value="Running">
-                                                        <Setter Property="Fill" Value="{DynamicResource OkBrush}" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding State}" Value="Failed">
-                                                        <Setter Property="Fill" Value="{DynamicResource ErrorBrush}" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Ellipse.Style>
-                                    </Ellipse>
-                                    <TextBlock Text="{Binding StateText}" FontSize="13" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
-                                    <TextBlock Text="{Binding RuntimeText}" FontSize="11.5" Margin="12,0,0,0"
-                                               Foreground="{DynamicResource MutedBrush}"
-                                               VerticalAlignment="Center" />
-                                </StackPanel>
-
-                                <!-- 本机地址 -->
-                                <TextBlock Text="本机地址" Style="{StaticResource MutedText}" Margin="0,12,0,4" />
+                                <!-- 端口 -->
+                                <TextBlock Text="端口" Style="{StaticResource FieldLabel}" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="110" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" Style="{StaticResource FlatTextBox}"
-                                             Text="{Binding LocalUrlText, Mode=OneWay}"
-                                             IsReadOnly="True" FontSize="12" />
-                                    <Button Grid.Column="1" Content="复制" Style="{StaticResource FlatButton}"
-                                            Padding="12,8" Margin="8,0,0,0"
-                                            Command="{Binding CopyCommand}"
-                                            CommandParameter="{Binding LocalUrlText}" />
+                                    <TextBox x:Name="PortInput" Grid.Column="0"
+                                             Style="{StaticResource FieldInput}"
+                                             Text="{Binding PortText, UpdateSourceTrigger=PropertyChanged}"
+                                             IsEnabled="{Binding CanEditPort}"
+                                             MaxLength="5" />
+                                    <CheckBox Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center"
+                                              Content="被占用时自动换一个空闲端口"
+                                              IsChecked="{Binding AllowPortDrift}"
+                                              IsEnabled="{Binding CanEditPort}"
+                                              Foreground="{DynamicResource TextSoftBrush}"
+                                              FontSize="12" />
                                 </Grid>
+                                <TextBlock Text="{Binding PortError}" Style="{StaticResource FieldError}"
+                                           Visibility="{Binding IsPortValid, Converter={StaticResource InverseBoolToVisibility}}" />
 
-                                <!-- 局域网地址 -->
-                                <TextBlock Text="局域网地址（发给朋友）" Style="{StaticResource MutedText}"
-                                           Margin="0,10,0,4" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" Style="{StaticResource FlatTextBox}"
-                                             Text="{Binding LanUrlText, Mode=OneWay}"
-                                             IsReadOnly="True" FontSize="12" />
-                                    <Button Grid.Column="1" Content="复制" Style="{StaticResource FlatButton}"
-                                            Padding="12,8" Margin="8,0,0,0"
-                                            Command="{Binding CopyCommand}"
-                                            CommandParameter="{Binding LanUrlText}" />
-                                </Grid>
+                                <!--
+                                    一键开服（v2.5.0 第 6 条）：一次点击 = 启动服务器 + 连接 + 用内置管理员登录。
+                                    就绪后同一个按钮变成「进入房间列表」，点它才真正进房。
+                                    下面**不再**要求用户输入用户名 / 密码（用内置管理员，明文写在按钮下方）。
+                                -->
+                                <Button x:Name="EmbeddedPrimaryAction" Margin="0,16,0,0"
+                                        Style="{StaticResource BlockPrimaryButton}"
+                                        Content="{Binding MainButtonText}"
+                                        Command="{Binding OneClickCommand}"
+                                        ToolTip="启动内置服务器 → 自动连接 → 以内置管理员登录" />
 
-                                <!-- 端口漂移提示 / 工作目录 -->
-                                <TextBlock Text="{Binding DriftNote}" FontSize="11" Margin="0,8,0,0"
-                                           TextWrapping="Wrap" Foreground="{DynamicResource WarnBrush}"
-                                           Visibility="{Binding HasDriftNote, Converter={StaticResource BoolToVisibility}}" />
+                                <!-- 分步状态：卡在哪一步一眼可见（失败不回滚已启动的服务器）。 -->
+                                <TextBlock x:Name="OneClickStepText" Text="{Binding StepText}"
+                                           Style="{StaticResource FieldHint}" Margin="0,8,0,0"
+                                           TextWrapping="Wrap"
+                                           Visibility="{Binding HasStepText, Converter={StaticResource BoolToVisibility}}" />
 
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{Binding WorkDirectoryText}" FontSize="10.5"
-                                               TextTrimming="CharacterEllipsis"
-                                               Foreground="{DynamicResource FaintBrush}"
-                                               VerticalAlignment="Center" ToolTip="{Binding WorkDirectoryText}" />
-                                    <Button Grid.Column="1" Content="打开服务器目录" Style="{StaticResource FlatButton}"
-                                            Padding="10,6" Margin="8,0,0,0" FontSize="11.5"
-                                            Command="{Binding OpenDirectoryCommand}"
-                                            ToolTip="打开配置 / 账号 / 词库所在的目录" />
-                                </Grid>
+                                <TextBlock Text="{Binding OneClickHint}" Style="{StaticResource FootnoteText}"
+                                           Margin="0,4,0,0" TextWrapping="Wrap" />
+
+                                <Button Margin="0,8,0,0" Style="{StaticResource BlockSecondaryButton}"
+                                        Content="停止服务器"
+                                        Command="{Binding StopCommand}" />
+
+                                <!-- 运行信息 -->
+                                <Border Margin="0,16,0,0" Padding="12" Style="{StaticResource CardSection}">
+                                    <StackPanel>
+                                        <!-- 状态徽章 -->
+                                        <StackPanel Orientation="Horizontal">
+                                            <Ellipse Width="9" Height="9" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Fill" Value="{DynamicResource MutedBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding State}" Value="Starting">
+                                                                <Setter Property="Fill" Value="{DynamicResource WarnBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding State}" Value="Stopping">
+                                                                <Setter Property="Fill" Value="{DynamicResource WarnBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding State}" Value="Running">
+                                                                <Setter Property="Fill" Value="{DynamicResource OkBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding State}" Value="Failed">
+                                                                <Setter Property="Fill" Value="{DynamicResource ErrorBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                            <TextBlock Text="{Binding StateText}" FontSize="14" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding RuntimeText}" Style="{StaticResource MinorText}"
+                                                       Margin="12,0,0,0" VerticalAlignment="Center" />
+                                        </StackPanel>
+
+                                        <!-- 本机地址 -->
+                                        <TextBlock Text="本机地址" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Style="{StaticResource FlatTextBox}"
+                                                     Text="{Binding LocalUrlText, Mode=OneWay}"
+                                                     IsReadOnly="True" FontSize="12" />
+                                            <Button Grid.Column="1" Content="复制" Style="{StaticResource FlatButton}"
+                                                    Padding="16,8" Margin="8,0,0,0"
+                                                    Command="{Binding CopyCommand}"
+                                                    CommandParameter="{Binding LocalUrlText}" />
+                                        </Grid>
+
+                                        <!-- 局域网地址 -->
+                                        <TextBlock Text="局域网地址（发给朋友）" Style="{StaticResource FieldLabel}"
+                                                   Margin="0,12,0,4" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Style="{StaticResource FlatTextBox}"
+                                                     Text="{Binding LanUrlText, Mode=OneWay}"
+                                                     IsReadOnly="True" FontSize="12" />
+                                            <Button Grid.Column="1" Content="复制" Style="{StaticResource FlatButton}"
+                                                    Padding="16,8" Margin="8,0,0,0"
+                                                    Command="{Binding CopyCommand}"
+                                                    CommandParameter="{Binding LanUrlText}" />
+                                        </Grid>
+
+                                        <!-- 端口漂移提示 / 工作目录 -->
+                                        <TextBlock Text="{Binding DriftNote}" Style="{StaticResource FieldError}"
+                                                   Foreground="{DynamicResource WarnBrush}"
+                                                   Visibility="{Binding HasDriftNote, Converter={StaticResource BoolToVisibility}}" />
+
+                                        <Grid Margin="0,12,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding WorkDirectoryText}"
+                                                       Style="{StaticResource FootnoteText}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center" ToolTip="{Binding WorkDirectoryText}" />
+                                            <Button Grid.Column="1" Content="打开服务器目录"
+                                                    Style="{StaticResource FlatButton}"
+                                                    Padding="16,8" Margin="8,0,0,0" FontSize="12"
+                                                    Command="{Binding OpenDirectoryCommand}"
+                                                    ToolTip="打开配置 / 账号 / 词库所在的目录" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <!--
+                                    v2.5.0：这里**不再**要求输入用户名 / 密码 ——
+                                    一键开服用的是内置管理员账号（界面上已明文标注用谁登录）。
+                                    想用自己的账号，请切到「连接现有服务器」页。
+                                -->
                             </StackPanel>
-                        </Border>
+                        </TabItem>
 
-                        <!-- 用户名 / 密码（与 Tab2 共用同一份凭据，切页不丢） -->
-                        <TextBlock Text="用户名" Style="{StaticResource MutedText}" Margin="0,14,0,6" />
-                        <TextBox x:Name="EmbeddedUsernameInput"
-                                 Style="{StaticResource FlatTextBox}"
-                                 Text="{Binding Login.UsernameInput, UpdateSourceTrigger=PropertyChanged,
-                                        RelativeSource={RelativeSource AncestorType=Window}}"
-                                 IsEnabled="{Binding Login.IsIdle, RelativeSource={RelativeSource AncestorType=Window}}"
-                                 MaxLength="20" />
+                        <!-- ─────────── Tab 2：连接现有服务器（与改造前逐项一致） ─────────── -->
+                        <TabItem x:Name="ExternalTab" Header="连接现有服务器"
+                                 DataContext="{Binding Login, RelativeSource={RelativeSource AncestorType=Window}}">
+                            <StackPanel Margin="0,4,0,0">
+                                <TextBlock Text="服务器地址" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="ServerUrlInput" Style="{StaticResource FieldInput}"
+                                         Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}"
+                                         IsEnabled="{Binding IsIdle}" />
 
-                        <TextBlock Text="密码" Style="{StaticResource MutedText}" Margin="0,12,0,6" />
-                        <PasswordBox x:Name="EmbeddedPasswordInput"
-                                     Style="{StaticResource FlatPasswordBox}"
-                                     IsEnabled="{Binding Login.IsIdle, RelativeSource={RelativeSource AncestorType=Window}}"
-                                     PasswordChanged="EmbeddedPasswordInput_OnPasswordChanged" />
+                                <!--
+                                    邀请码：粘贴好友分享的码后点「使用」，会自动填好上面的服务器地址，
+                                    登录成功后直接进入该房间（房间密码由邀请码携带，无需手动输入）。
+                                -->
+                                <TextBlock Text="邀请码（可选）" Style="{StaticResource FieldLabel}" Margin="0,16,0,4" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="InviteCodeInput" Grid.Column="0" Style="{StaticResource FieldInput}"
+                                             Text="{Binding InviteCode, UpdateSourceTrigger=PropertyChanged}"
+                                             IsEnabled="{Binding IsIdle}" />
+                                    <Button Grid.Column="1" Content="使用邀请码" Style="{StaticResource FlatButton}"
+                                            Padding="16,8" Margin="8,0,0,0"
+                                            Command="{Binding UseInviteCommand}"
+                                            IsEnabled="{Binding IsIdle}" />
+                                </Grid>
+                                <TextBlock Text="{Binding InviteHint}" Style="{StaticResource FieldError}"
+                                           Foreground="{DynamicResource OkBrush}"
+                                           Visibility="{Binding HasInviteHint, Converter={StaticResource BoolToVisibility}}" />
 
-                        <Button Margin="0,14,0,0" Height="40" Padding="14,9"
-                                Style="{StaticResource FlatButton}"
-                                Content="登录 / 注册（连这台电脑上的服务器）"
-                                Command="{Binding LoginToEmbeddedCommand}" />
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
+                                <!-- ═══════════════ 用户名 ═══════════════ -->
+                                <TextBlock Text="用户名" Style="{StaticResource FieldLabel}" Margin="0,16,0,4" />
+                                <TextBox x:Name="UsernameInput" Style="{StaticResource FieldInput}"
+                                         Text="{Binding UsernameInput, UpdateSourceTrigger=PropertyChanged}"
+                                         IsEnabled="{Binding IsIdle}"
+                                         MaxLength="20" />
 
-            <!-- ─────────── Tab 2：连接现有服务器（与改造前逐项一致） ─────────── -->
-            <TabItem x:Name="ExternalTab" Header="🌐 连接现有服务器"
-                     DataContext="{Binding Login, RelativeSource={RelativeSource AncestorType=Window}}">
-                <StackPanel Margin="0,2,0,0">
-                    <TextBlock Text="服务器地址" Style="{StaticResource MutedText}" Margin="0,0,0,6" />
-                    <TextBox x:Name="ServerUrlInput"
-                             Style="{StaticResource FlatTextBox}"
-                             Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}"
-                             IsEnabled="{Binding IsIdle}" />
+                                <!-- ═══════════════ 密码 ═══════════════ -->
+                                <TextBlock Text="密码" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+                                <PasswordBox x:Name="PasswordInput" Style="{StaticResource FieldPassword}"
+                                             IsEnabled="{Binding IsIdle}"
+                                             PasswordChanged="PasswordInput_OnPasswordChanged" />
 
-                    <!--
-                        邀请码：粘贴好友分享的码后点「使用」，会自动填好上面的服务器地址，
-                        登录成功后直接进入该房间（房间密码由邀请码携带，无需手动输入）。
-                    -->
-                    <TextBlock Text="邀请码（可选）" Style="{StaticResource MutedText}" Margin="0,14,0,6" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox x:Name="InviteCodeInput" Grid.Column="0"
-                                 Style="{StaticResource FlatTextBox}"
-                                 Text="{Binding InviteCode, UpdateSourceTrigger=PropertyChanged}"
-                                 IsEnabled="{Binding IsIdle}" />
-                        <Button Grid.Column="1" Content="使用邀请码" Style="{StaticResource FlatButton}"
-                                Padding="14,8" Margin="8,0,0,0"
-                                Command="{Binding UseInviteCommand}"
-                                IsEnabled="{Binding IsIdle}" />
-                    </Grid>
-                    <TextBlock Text="{Binding InviteHint}" FontSize="11.5" Margin="0,8,0,0" TextWrapping="Wrap"
-                               Foreground="{DynamicResource OkBrush}"
-                               Visibility="{Binding HasInviteHint, Converter={StaticResource BoolToVisibility}}" />
+                                <!-- ═══════════════ 登录按钮（通栏主按钮） ═══════════════ -->
+                                <Button x:Name="PrimaryAction" Margin="0,16,0,0"
+                                        Style="{StaticResource BlockPrimaryButton}"
+                                        Content="登录 / 注册"
+                                        Command="{Binding LoginCommand}"
+                                        IsEnabled="{Binding IsIdle}" />
+                            </StackPanel>
+                        </TabItem>
+                    </TabControl>
+                </Border>
 
-                    <!-- ═══════════════ 用户名 ═══════════════ -->
-                    <TextBlock Text="用户名" Style="{StaticResource MutedText}" Margin="0,14,0,6" />
-                    <TextBox x:Name="UsernameInput"
-                             Style="{StaticResource FlatTextBox}"
-                             Text="{Binding UsernameInput, UpdateSourceTrigger=PropertyChanged}"
-                             IsEnabled="{Binding IsIdle}"
-                             MaxLength="20" />
+                <Border Style="{StaticResource CardPanel}">
+                    <TextBlock Style="{StaticResource FootnoteText}"
+                               Text="内置服务器只在这台电脑上跑，关掉客户端会一起关掉；想让同网络的朋友加入，把上面的局域网地址发给他即可（首次监听若弹出防火墙提示，请选择允许）。&#x0a;首次登录的用户名会自动注册；掉线后用相同的用户名 + 密码重新登录即可恢复原房间身份。&#x0a;默认地址 http://localhost:5000/gamehub（快速幂协商密钥 + 会话加密）" />
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
 
-                    <!-- ═══════════════ 密码 ═══════════════ -->
-                    <TextBlock Text="密码" Style="{StaticResource MutedText}" Margin="0,12,0,6" />
-                    <PasswordBox x:Name="PasswordInput"
-                                 Style="{StaticResource FlatPasswordBox}"
-                                 IsEnabled="{Binding IsIdle}"
-                                 PasswordChanged="PasswordInput_OnPasswordChanged" />
-
-                    <!-- ═══════════════ 登录按钮 ═══════════════ -->
-                    <Button Margin="0,20,0,0" Height="42"
-                            Style="{StaticResource PrimaryButton}"
-                            Content="登录 / 注册"
-                            Command="{Binding LoginCommand}"
-                            IsEnabled="{Binding IsIdle}" />
-                </StackPanel>
-            </TabItem>
-        </TabControl>
-
-        <!-- ═══════════════ 共享状态条 ═══════════════ -->
-        <Border Grid.Row="2" Margin="0,14,0,0" Padding="12,9" CornerRadius="6"
-                Background="{DynamicResource CardBrush}">
+        <!-- ═══════════════ 底部操作条（共享状态） ═══════════════ -->
+        <Border Grid.Row="2" Style="{StaticResource FooterBar}">
             <!--
                 文字颜色交给样式 + DataTrigger；不要在元素上直接写 Foreground，
                 本地值优先级高于样式触发器，会让“失败标红”失效。
             -->
-            <TextBlock Text="{Binding Login.Status, RelativeSource={RelativeSource AncestorType=Window}}"
-                       FontSize="12" TextWrapping="Wrap">
+            <TextBlock Text="{Binding Login.Status, RelativeSource={RelativeSource AncestorType=Window}}">
                 <TextBlock.Style>
-                    <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource MinorText}">
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding Login.ShowError, RelativeSource={RelativeSource AncestorType=Window}}"
                                          Value="True">
@@ -311,12 +297,5 @@
                 </TextBlock.Style>
             </TextBlock>
         </Border>
-
-        <!-- ═══════════════ 底部提示 ═══════════════ -->
-        <Grid Grid.Row="3" Margin="0,12,0,0">
-            <TextBlock FontSize="11" TextWrapping="Wrap"
-                       Foreground="{DynamicResource FaintBrush}"
-                       Text="内置服务器只在这台电脑上跑，关掉客户端会一起关掉；想让同网络的朋友加入，把上面的局域网地址发给他即可（首次监听若弹出防火墙提示，请选择允许）。&#x0a;首次登录的用户名会自动注册；掉线后用相同的用户名 + 密码重新登录即可恢复原房间身份。&#x0a;默认地址 http://localhost:5000/gamehub（快速幂协商密钥 + 会话加密）" />
-        </Grid>
     </Grid>
 </Window>

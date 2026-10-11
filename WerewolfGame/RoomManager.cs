@@ -21,24 +21,48 @@ public sealed class RoomManager
     private readonly IGameCatalog _catalog;
     private readonly RoomOptions _options;
     private readonly IGameConfig? _config;
+    private readonly IAccountDirectory? _accounts;
 
-    public RoomManager(EncryptedChannel channel, IGameCatalog catalog, RoomOptions options, IGameConfig? config = null)
+    /// <param name="channel">出站加密通道。</param>
+    /// <param name="catalog">游戏目录（本类不感知任何具体游戏）。</param>
+    /// <param name="options">房间回收等选项。</param>
+    /// <param name="config">只读配置门面。</param>
+    /// <param name="accounts">
+    /// 账号目录（可选）：用于把「房主称号」填进房间列表。**末尾可选参数**，
+    /// 既有的 <c>new RoomManager(channel, catalog, options)</c> 调用点一行都不用改。
+    /// </param>
+    public RoomManager(EncryptedChannel channel, IGameCatalog catalog, RoomOptions options,
+                       IGameConfig? config = null, IAccountDirectory? accounts = null)
     {
         _channel = channel;
         _catalog = catalog;
         _options = options;
         _config = config;
+        _accounts = accounts;
     }
 
     /// <summary>当前存活房间数。</summary>
     public int Count => _rooms.Count;
 
-    /// <summary>列出全部房间摘要（按创建时间排序）。</summary>
+    /// <summary>
+    /// 列出全部房间摘要（按创建时间排序），并把**房主的称号**一并填上
+    /// （称号随房间列表自然下发，零额外往返 —— 架构 D4）。
+    /// </summary>
     public List<RoomInfoDto> List()
-        => _rooms.Values
+    {
+        var accounts = _accounts;
+
+        return _rooms.Values
             .OrderBy(r => r.CreatedAt)
             .Select(r => r.ToInfo())
+            .Select(info =>
+            {
+                if (accounts != null && !string.IsNullOrEmpty(info.Host))
+                    info.HostTitle = accounts.TitleOf(info.Host);
+                return info;
+            })
             .ToList();
+    }
 
     /// <summary>按房间号查找房间；不存在返回 null。</summary>
     public GameRoom? Find(string roomId)
@@ -101,7 +125,7 @@ public sealed class RoomManager
             return (false, ex.Message, "", false);
         }
 
-        var room = new GameRoom(roomId, roomName, password, _channel, resolved, factory, _config);
+        var room = new GameRoom(roomId, roomName, password, _channel, resolved, factory, _config, _accounts);
         if (!_rooms.TryAdd(roomId, room))
             return (false, ServerMessages.TooManyRooms, "", false);
 

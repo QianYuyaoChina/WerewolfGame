@@ -30,6 +30,12 @@ public class GameRoom : IGameContext
     private readonly IGameConfig _config;
 
     /// <summary>
+    /// 账号目录（可选）：只用于在下发状态时补上每个玩家的**称号**。
+    /// 平台不关心称号怎么存，只调用 <see cref="IAccountDirectory.TitleOf"/>。
+    /// </summary>
+    private readonly IAccountDirectory? _accounts;
+
+    /// <summary>
     /// 房主为本房间设置的「游戏私有配置」（对平台是**不透明字符串**，由游戏自己解释）。
     /// 狼人杀用它承载自定义身份布局；null 表示使用游戏的默认配置。
     /// </summary>
@@ -54,15 +60,19 @@ public class GameRoom : IGameContext
     /// 构造一个房间。密码为 null/空白时视为公开房间（仅保存带盐哈希，不保存明文）。
     /// <paramref name="gameFactory"/> 由 <c>GameCatalog</c> 提供：房间用它创建绑定的游戏实例。
     /// <paramref name="config"/> 为只读配置门面（缺省用空配置，游戏回退内置默认规则）。
+    /// <paramref name="accounts"/> 为账号目录（可选，缺省则不下发称号）。**末尾可选参数**，
+    /// 既有的 <c>new GameRoom(...)</c> 调用点一行都不用改。
     /// </summary>
     public GameRoom(string id, string name, string? password, EncryptedChannel channel,
-                    string gameId, Func<IGameContext, IGameInstance> gameFactory, IGameConfig? config = null)
+                    string gameId, Func<IGameContext, IGameInstance> gameFactory,
+                    IGameConfig? config = null, IAccountDirectory? accounts = null)
     {
         Id = id ?? "";
         Name = string.IsNullOrWhiteSpace(name) ? "房间" : name.Trim();
         GameId = string.IsNullOrWhiteSpace(gameId) ? GameIds.Default : gameId;
         _channel = channel;
         _config = config ?? new GameConfig(null);
+        _accounts = accounts;
         _inviteToken = NewInviteToken();
         _passwordHash = string.IsNullOrWhiteSpace(password) ? null : RoomPassword.Hash(Id, password);
 
@@ -515,7 +525,11 @@ public class GameRoom : IGameContext
         }
     }
 
-    /// <summary>组装某玩家视角的通用 DTO，并回调游戏补齐私有负载与玩家标签（调用方需持有房间锁）。</summary>
+    /// <summary>把「空字符串」统一成 null，让界面只要判断 null 就知道有没有称号。</summary>
+    private static string? EmptyToNull(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>组装某玩家视角的通用 DTO（调用方需持有房间锁）。</summary>
     private GameStateDto BuildStateFor(RoomPlayer viewer)
     {
         var status = _game.Status;
@@ -541,7 +555,9 @@ public class GameRoom : IGameContext
                 IsAlive = p.IsAlive,
                 IsHost = p.IsHost,
                 IsConnected = p.IsConnected,
-                IsYou = ReferenceEquals(p, viewer)
+                IsYou = ReferenceEquals(p, viewer),
+                // 称号：服务端权威存储，随状态自然下发（null / 空 = 无称号，界面不渲染）。
+                Title = EmptyToNull(_accounts?.TitleOf(p.Username))
             }).ToList()
         };
 

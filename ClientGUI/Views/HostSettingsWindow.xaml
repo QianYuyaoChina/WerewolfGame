@@ -1,6 +1,10 @@
 <!--
     注意：窗口根元素上的 Foreground/Background 必须用 DynamicResource。
     静态资源在解析这两个属性时还看不到本元素下面声明的 Resources。
+
+    v2.5.0 小程序骨架：导航栏 56（左游戏徽章 / 中标题）+ 灰底上的白色卡片内容区 + 通栏底部主按钮。
+    结构契约（UiSmokeCheck）必须保留：Tabs / LayoutTab / MaxPlayersInput / PasswordInput /
+    AutoLayoutBox / GameEmojiText / GameBadge（ToolTip 含游戏名）一个都不能少。
 -->
 <Window x:Class="ClientGUI.Views.HostSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -10,11 +14,11 @@
         xmlns:vm="clr-namespace:ClientGUI.ViewModels"
         mc:Ignorable="d"
         Title="房主设置"
-        Height="612" Width="584"
+        Height="680" Width="584"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource BgBrush}"
+        Background="{DynamicResource PageBgBrush}"
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         UseLayoutRounding="True"
@@ -28,147 +32,161 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid Margin="26,22">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />  <!-- 导航栏 -->
+            <RowDefinition Height="*" />     <!-- 卡片内容区 -->
+            <RowDefinition Height="Auto" />  <!-- 底部操作条 -->
         </Grid.RowDefinitions>
 
-        <!-- ═══════════════ 标题 ═══════════════ -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
-            <!-- 游戏标识：不同游戏的房间一眼可辨（图标 + 中文名 + 主题色） -->
-            <Border x:Name="GameBadge" Width="44" Height="44" CornerRadius="12"
-                    Background="{DynamicResource CardBrush}"
-                    BorderThickness="1.5" VerticalAlignment="Center">
-                <Border.BorderBrush>
-                    <SolidColorBrush x:Name="GameBadgeBrush" Color="#7C8AA5" />
-                </Border.BorderBrush>
-                <TextBlock x:Name="GameEmojiText" Text="🎮" FontSize="20"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="房主设置" FontSize="17" FontWeight="Bold"
-                           Foreground="{DynamicResource TextBrush}" />
-                <TextBlock x:Name="RoomText" FontSize="12" Margin="0,4,0,0"
-                           Foreground="{DynamicResource MutedBrush}" />
-            </StackPanel>
-        </StackPanel>
+        <!-- ═══════════════ 导航栏（左：游戏徽章 / 中：标题） ═══════════════ -->
+        <Border x:Name="NavBar" Grid.Row="0" Style="{StaticResource NavBarPanel}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-        <!-- ═══════════════ 标签页 ═══════════════ -->
-        <TabControl Grid.Row="1" x:Name="Tabs" Style="{StaticResource FlatTabControl}">
+                <!-- 游戏标识：不同游戏的房间一眼可辨（图标 + 中文名 + 主题色） -->
+                <Border x:Name="GameBadge" Grid.Column="0" Width="44" Height="44" CornerRadius="12"
+                        Background="{DynamicResource CardBrush}" HorizontalAlignment="Left"
+                        BorderThickness="1.5" VerticalAlignment="Center">
+                    <Border.BorderBrush>
+                        <!--
+                            兜底色由主题提供（待办 T4）：这里不再写死 #7C8AA5。
+                            房间带了游戏主题色时由代码按主题色覆盖。
+                        -->
+                        <SolidColorBrush x:Name="GameBadgeBrush"
+                                         Color="{DynamicResource GameBadgeFallbackColor}" />
+                    </Border.BorderBrush>
+                    <TextBlock x:Name="GameEmojiText" Text="🎮" FontSize="20"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
 
-            <!-- ─────────── 房间 ─────────── -->
-            <TabItem Header="房间">
-                <StackPanel>
-                    <TextBlock Text="最大人数" Style="{StaticResource SectionTitle}" />
-                    <TextBox x:Name="MaxPlayersInput" Style="{StaticResource FlatTextBox}" Width="120"
-                             HorizontalAlignment="Left" />
-                    <TextBlock x:Name="MaxPlayersHint" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"
-                               Foreground="{DynamicResource FaintBrush}" />
+                <TextBlock Grid.Column="1" x:Name="NavTitleText" Text="房主设置"
+                           Style="{StaticResource NavTitleText}" />
 
-                    <TextBlock Text="房间密码" Style="{StaticResource SectionTitle}" Margin="0,20,0,8" />
-                    <PasswordBox x:Name="PasswordInput" Style="{StaticResource FlatPasswordBox}" />
-                    <CheckBox x:Name="ClearPasswordBox" Content="清除密码（改为公开房间）" Margin="0,10,0,0"
-                              Foreground="{DynamicResource TextBrush}" />
-                    <TextBlock Text="留空表示不修改密码。改密码不会影响已经发出去的邀请码。"
-                               FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
-                               Foreground="{DynamicResource FaintBrush}" />
-                </StackPanel>
-            </TabItem>
-
-            <!-- ─────────── 身份配置 ─────────── -->
-            <!-- 只有 HasPlayerConfig 的游戏（如狼人杀）才显示；谁是卧底等没有身份配置的玩法会隐藏本页。 -->
-            <TabItem x:Name="LayoutTab" Header="身份配置">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Grid.Row="0" x:Name="LayoutHint" FontSize="11.5" TextWrapping="Wrap"
-                               Margin="0,0,0,10" Foreground="{DynamicResource MutedBrush}" />
-
-                    <CheckBox Grid.Row="1" x:Name="AutoLayoutBox" Content="跟随人数自动配置（推荐）"
-                              VerticalAlignment="Top" Margin="0,0,0,8"
-                              Foreground="{DynamicResource TextBrush}"
-                              Checked="AutoLayout_OnChanged" Unchecked="AutoLayout_OnChanged" />
-
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,0,0,0">
-                        <ItemsControl x:Name="LayoutList">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type vm:RoleCountRow}">
-                                    <Grid Margin="0,3">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="52" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="{Binding Display}" FontSize="13"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextBrush}" />
-                                        <Button Grid.Column="1" Content="−" Style="{StaticResource FlatButton}"
-                                                Padding="10,2" Margin="0,0,6,0" Tag="{Binding}"
-                                                Click="Decrease_OnClick"
-                                                ToolTip="减少 1 个" />
-                                        <TextBox Grid.Column="2" Style="{StaticResource FlatTextBox}"
-                                                 Text="{Binding CountText, UpdateSourceTrigger=PropertyChanged}"
-                                                 TextAlignment="Center" TextChanged="Count_OnTextChanged" />
-                                        <Button Grid.Column="3" Content="+" Style="{StaticResource FlatButton}"
-                                                Padding="10,2" Margin="6,0,0,0" Tag="{Binding}"
-                                                Click="Increase_OnClick"
-                                                ToolTip="增加 1 个" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,10,0,0">
-                        <Button Content="恢复默认布局" Style="{StaticResource FlatButton}" Padding="14,6"
-                                Click="ResetLayout_OnClick" />
-                    </StackPanel>
-                </Grid>
-            </TabItem>
-
-            <!-- ─────────── 邀请码 ─────────── -->
-            <TabItem Header="邀请码">
-                <StackPanel>
-                    <TextBlock Text="当前邀请码" Style="{StaticResource SectionTitle}" />
-                    <TextBox x:Name="InviteCodeBox" Style="{StaticResource FlatTextBox}"
-                             IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" Height="96"
-                             Padding="10,8" FontFamily="Consolas, Microsoft YaHei UI" FontSize="11.5" />
-                    <TextBlock Text="邀请码里放的是房间的邀请令牌（不是密码），所以修改房间密码后它依然有效；只有点「重置邀请令牌」才会让旧码失效。"
-                               FontSize="11" Margin="0,10,0,0" TextWrapping="Wrap"
-                               Foreground="{DynamicResource FaintBrush}" />
-
-                    <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                        <Button Content="复制邀请码" Style="{StaticResource FlatButton}" Padding="14,7"
-                                Click="CopyInvite_OnClick" />
-                        <Button Content="重置邀请令牌（作废旧码）" Style="{StaticResource DangerButton}"
-                                Padding="14,7" Margin="10,0,0,0" Click="ResetInvite_OnClick" />
-                    </StackPanel>
-                </StackPanel>
-            </TabItem>
-        </TabControl>
-
-        <!-- ═══════════════ 状态 ═══════════════ -->
-        <Border Grid.Row="2" Background="{DynamicResource CardBrush}" CornerRadius="6"
-                Padding="12,9" Margin="0,12,0,0">
-            <TextBlock x:Name="StatusText" Text="正在读取房间设置…" FontSize="12" TextWrapping="Wrap"
-                       Foreground="{DynamicResource MutedBrush}" />
+                <!-- 右侧槽位没有内容时留空，不放占位按钮。 -->
+                <TextBlock Grid.Column="2" HorizontalAlignment="Right" />
+            </Grid>
         </Border>
 
-        <!-- ═══════════════ 按钮 ═══════════════ -->
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-            <Button Content="关闭" Style="{StaticResource FlatButton}" Padding="18,8" Margin="0,0,10,0"
-                    Click="Close_OnClick" />
-            <Button x:Name="SaveButton" Content="保存设置" Style="{StaticResource PrimaryButton}" Padding="18,8"
-                    Click="Save_OnClick" />
-        </StackPanel>
+        <!-- ═══════════════ 内容区（灰底 + 白色卡片） ═══════════════ -->
+        <ScrollViewer Grid.Row="1" Style="{StaticResource PageScroll}" Margin="12,12,12,0">
+            <StackPanel>
+
+                <TextBlock x:Name="RoomText" Style="{StaticResource MinorText}" Margin="4,0,0,12" />
+
+                <Border Style="{StaticResource CardPanel}">
+                    <TabControl x:Name="Tabs" Style="{StaticResource FlatTabControl}">
+
+                        <!-- ─────────── 房间 ─────────── -->
+                        <TabItem Header="房间">
+                            <StackPanel>
+                                <TextBlock Text="最大人数" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="MaxPlayersInput" Style="{StaticResource FieldInput}"
+                                         Width="120" HorizontalAlignment="Left" />
+                                <TextBlock x:Name="MaxPlayersHint" Style="{StaticResource FieldHint}" />
+
+                                <TextBlock Text="房间密码" Style="{StaticResource FieldLabel}" Margin="0,16,0,4" />
+                                <PasswordBox x:Name="PasswordInput" Style="{StaticResource FieldPassword}" />
+                                <CheckBox x:Name="ClearPasswordBox" Content="清除密码（改为公开房间）"
+                                          Margin="0,12,0,0"
+                                          Foreground="{DynamicResource TextBrush}" />
+                                <TextBlock Style="{StaticResource FieldHint}"
+                                           Text="留空表示不修改密码。改密码不会影响已经发出去的邀请码。" />
+                            </StackPanel>
+                        </TabItem>
+
+                        <!-- ─────────── 身份配置 ─────────── -->
+                        <!-- 只有 HasPlayerConfig 的游戏（如狼人杀）才显示；谁是卧底等没有身份配置的玩法会隐藏本页。 -->
+                        <TabItem x:Name="LayoutTab" Header="身份配置">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" x:Name="LayoutHint" Style="{StaticResource MinorText}"
+                                           Margin="0,0,0,12" />
+
+                                <CheckBox Grid.Row="1" x:Name="AutoLayoutBox" Content="跟随人数自动配置（推荐）"
+                                          VerticalAlignment="Top"
+                                          Foreground="{DynamicResource TextBrush}"
+                                          Checked="AutoLayout_OnChanged" Unchecked="AutoLayout_OnChanged" />
+
+                                <ItemsControl Grid.Row="2" x:Name="LayoutList" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:RoleCountRow}">
+                                            <Grid Margin="0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="52" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="{Binding Display}" FontSize="14"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource TextBrush}" />
+                                                <Button Grid.Column="1" Content="−" Style="{StaticResource FlatButton}"
+                                                        Padding="12,4" Margin="0,0,6,0" Tag="{Binding}"
+                                                        Click="Decrease_OnClick"
+                                                        ToolTip="减少 1 个" />
+                                                <TextBox Grid.Column="2" Style="{StaticResource FlatTextBox}"
+                                                         Text="{Binding CountText, UpdateSourceTrigger=PropertyChanged}"
+                                                         TextAlignment="Center" TextChanged="Count_OnTextChanged" />
+                                                <Button Grid.Column="3" Content="+" Style="{StaticResource FlatButton}"
+                                                        Padding="12,4" Margin="6,0,0,0" Tag="{Binding}"
+                                                        Click="Increase_OnClick"
+                                                        ToolTip="增加 1 个" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Button Grid.Row="3" Content="恢复默认布局" Style="{StaticResource BlockSecondaryButton}"
+                                        Margin="0,12,0,0" Click="ResetLayout_OnClick" />
+                            </Grid>
+                        </TabItem>
+
+                        <!-- ─────────── 邀请码 ─────────── -->
+                        <TabItem Header="邀请码">
+                            <StackPanel>
+                                <TextBlock Text="当前邀请码" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="InviteCodeBox" Style="{StaticResource FlatTextBox}"
+                                         IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" Height="96"
+                                         Padding="10,8" FontFamily="Consolas, Microsoft YaHei UI" FontSize="12" />
+                                <TextBlock Style="{StaticResource FieldHint}"
+                                           Text="邀请码里放的是房间的邀请令牌（不是密码），所以修改房间密码后它依然有效；只有点「重置邀请令牌」才会让旧码失效。" />
+
+                                <Button Content="复制邀请码" Style="{StaticResource BlockSecondaryButton}"
+                                        Margin="0,16,0,0" Click="CopyInvite_OnClick" />
+                                <Button Content="重置邀请令牌（作废旧码）" Style="{StaticResource BlockSecondaryButton}"
+                                        Margin="0,8,0,0" Foreground="{DynamicResource DangerTextBrush}"
+                                        Click="ResetInvite_OnClick" />
+                            </StackPanel>
+                        </TabItem>
+                    </TabControl>
+                </Border>
+
+                <!-- 状态：就地显示，不弹框 -->
+                <Border Style="{StaticResource CardPanel}">
+                    <TextBlock x:Name="StatusText" Text="正在读取房间设置…" Style="{StaticResource MinorText}" />
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ═══════════════ 底部操作条（主按钮通栏在上，次按钮通栏在下） ═══════════════ -->
+        <Border Grid.Row="2" Style="{StaticResource FooterBar}">
+            <StackPanel>
+                <Button x:Name="PrimaryAction" Content="保存设置" Style="{StaticResource BlockPrimaryButton}"
+                        Click="Save_OnClick" />
+                <Button Content="关闭" Style="{StaticResource BlockSecondaryButton}" Margin="0,8,0,0"
+                        Click="Close_OnClick" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

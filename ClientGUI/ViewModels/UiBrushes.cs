@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Media;
 using Werewolf.Client.Share;
 
@@ -9,15 +10,25 @@ namespace ClientGUI.ViewModels;
 /// </summary>
 public static class UiBrushes
 {
-    public static Brush Alive { get; } = Frozen(Color.FromRgb(84, 214, 154));
-    public static Brush Dead { get; } = Frozen(Color.FromRgb(230, 96, 96));
+    // v2.5.0 待办 T3（架构 U7 降级为 P1，本轮做掉其中「与主题同义」的四个）：
+    // 下面这四个本来写死了 RGB，切到浅色主题时不跟着变（深色底上才看得清的那几个值，
+    // 到浅色底上就是「看不见的字」）。现在改成**实时查主题**，深浅都可读。
 
-    /// <summary>警示色（重连中 / 需要提醒的状态）。</summary>
-    public static Brush Warning { get; } = Frozen(Color.FromRgb(240, 190, 90));
+    /// <summary>存活 / 在线色（对应主题的 OkBrush）。</summary>
+    public static Brush Alive => ThemeBrush("OkBrush");
 
-    /// <summary>弱化文字色（与主题 MutedBrush 同值，供无颜色标签兜底）。</summary>
-    public static Brush Muted { get; } = Frozen(Color.FromRgb(141, 154, 178));
+    /// <summary>出局 / 断线色（对应主题的 ErrorBrush）。</summary>
+    public static Brush Dead => ThemeBrush("ErrorBrush");
 
+    /// <summary>警示色（重连中 / 需要提醒的状态，对应主题的 WarnBrush）。</summary>
+    public static Brush Warning => ThemeBrush("WarnBrush");
+
+    /// <summary>弱化文字色（对应主题的 MutedBrush，供无颜色标签兜底）。</summary>
+    public static Brush Muted => ThemeBrush("MutedBrush");
+
+    // 下面这些是「叠在行底色上的半透明层」，颜色方向（深色主题叠白、浅色主题应叠黑）
+    // 依赖主题极性，硬换一套值会让玩家行渲染断言与观感一起变；
+    // 按架构 U7 本轮保留，待 P1 与玩家行样式一起改造（见 docs/TODO.md T3）。
     public static Brush RowBackgroundDead { get; } = Frozen(Color.FromArgb(20, 255, 255, 255));
     public static Brush RowBackgroundSelectable { get; } = Frozen(Color.FromArgb(28, 124, 196, 255));
     public static Brush RowBackgroundNormal { get; } = Frozen(Color.FromArgb(12, 255, 255, 255));
@@ -60,6 +71,24 @@ public static class UiBrushes
         {
             return fallback;
         }
+    }
+
+    /// <summary>
+    /// 实时查 Application 级主题色键（不缓存：缓存了就切不了主题）。
+    /// 纯逻辑测试宿主里没有 Application，此时退化为中性灰，不影响断言语义。
+    /// </summary>
+    private static Brush ThemeBrush(string colorKey)
+    {
+        try
+        {
+            if (Application.Current?.TryFindResource(colorKey) is Brush brush) return brush;
+        }
+        catch
+        {
+            // 主题尚未初始化（例如纯逻辑校验）：走下面的兜底。
+        }
+
+        return Brushes.Gray;
     }
 
     private static SolidColorBrush Frozen(Color color)

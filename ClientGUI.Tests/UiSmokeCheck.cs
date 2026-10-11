@@ -68,6 +68,19 @@ public static class UiSmokeCheck
                 CheckTheme();
                 CheckClipboard();
 
+                // v2.5.0：小程序风格守护断言（A1–A6）。
+                // 纯追加 —— 既有断言一条不改，--ui 的断言数只会增加不会减少。
+                // 它们要实例化窗口并做真实布局测量，因此跑在同一个 STA 线程里。
+                AppShellGuard.Run();
+
+                // v2.5.0 B4 / B5：一键开服状态机 / 改密码浮层 / 导航标题几何居中（≤1px）。
+                // 纯追加 —— 与上面的风格断言同批次跑（都要真实布局测量）。
+                V25BatchProbe.RunUiChecks();
+
+                // v2.5.0：QA 独立复核（严过关）—— 真实布局后的尺寸实测，
+        // 与 AppShellGuard 不共享任何判定代码，同样是纯追加。
+                AppShellQaGuard.RunMeasuredStyleGuards();
+
                 app.Shutdown();
             }
             catch (Exception ex)
@@ -315,10 +328,10 @@ public static class UiSmokeCheck
         Check.True(tabs != null, "设置：使用标签页组织设置项");
         if (tabs != null)
         {
-            Check.Equal(3, tabs.Items.Count, "设置：共 3 个标签页");
+            Check.Equal(4, tabs.Items.Count, "设置：共 4 个标签页");
             var headers = tabs.Items.OfType<TabItem>().Select(t => t.Header?.ToString()).ToList();
-            Check.SequenceEqual(new[] { "外观", "主界面", "上次使用" }, headers,
-                "设置：标签页依次为 外观 / 主界面 / 上次使用");
+            Check.SequenceEqual(new[] { "外观", "主界面", "上次使用", "账号设置" }, headers,
+                "设置：标签页依次为 外观 / 主界面 / 上次使用 / 账号设置");
 
             var switchedAll = true;
             for (var i = 0; i < tabs.Items.Count; i++)
@@ -326,9 +339,32 @@ public static class UiSmokeCheck
                 tabs.SelectedIndex = i;
                 if (((TabControl)settings.FindName("Tabs")!).SelectedIndex != i) switchedAll = false;
             }
-            Check.True(switchedAll, "设置：三个标签页都能切换");
+            Check.True(switchedAll, "设置：四个标签页都能切换");
             tabs.SelectedIndex = 0;
         }
+
+        // 收尾轮：账号入口收进第 4 个标签页「账号设置」，入口存在且按会话身份显隐。
+        var changePwd = settings.FindName("ChangePasswordButton") as Button;
+        var serverSettings = settings.FindName("ServerSettingsButton") as Button;
+        Check.True(changePwd != null, "设置：账号设置页含「修改密码…」按钮（ChangePasswordButton）");
+        Check.True(serverSettings != null, "设置：账号设置页含「服务器设置…」按钮（ServerSettingsButton）");
+
+        // 这个 SettingsWindow 没有会话（未登录）→ 改密码不可用、服务器设置不可见。
+        Check.False(changePwd?.IsEnabled == true, "设置：未登录时「修改密码…」不可用");
+        Check.True(serverSettings?.Visibility == Visibility.Collapsed,
+            "设置：非管理员时「服务器设置…」不可见");
+
+        // 显隐规则的纯函数：登录后可用 / 仅管理员可见。
+        var anonymous = SettingsWindow.AccountEntryVisibility(false, false);
+        Check.False(anonymous.ChangePasswordEnabled || anonymous.ServerSettingsVisible,
+            "设置：未登录 → 改密码不可用、服务器设置不可见");
+        var normalUser = SettingsWindow.AccountEntryVisibility(true, false);
+        Check.True(normalUser.ChangePasswordEnabled && !normalUser.ServerSettingsVisible,
+            "设置：已登录普通用户 → 可改密码，但看不到服务器设置（仅管理员可见）");
+        var adminUser = SettingsWindow.AccountEntryVisibility(true, true);
+        Check.True(adminUser.ChangePasswordEnabled && adminUser.ServerSettingsVisible,
+            "设置：管理员 → 可改密码，且能看到服务器设置");
+
         Check.True((settings.FindName("ThemeDark") as RadioButton)?.IsChecked == true,
             "设置：主题单选反映当前偏好（深色）");
 

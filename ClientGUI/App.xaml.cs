@@ -91,7 +91,7 @@ namespace ClientGUI
 
         /// <summary>系统注销 / 关机时同样触发收尾（否则内置服务器会留下孤儿进程）。</summary>
         private void OnSessionEnding(object sender, SessionEndingCancelEventArgs e)
-            => AppShutdown.RunWithPump();
+            => AppShutdown.RunWithPump();   // 关闭来源：CloseIntentSource.SystemSession → 完整收尾
 
         /// <summary>
         /// 房间列表 → 主窗口循环：退出房间回到房间列表（连接不拆）；
@@ -109,10 +109,13 @@ namespace ClientGUI
                 {
                     if (!session.IsJoined)   // 邀请码可能已经把我们带进房间了
                     {
-                        var list = new RoomListWindow(session);
-                        if (list.ShowDialog() != true) break;   // 关闭房间列表 → 退出程序
+                    // 关闭来源：CloseIntentSource.RoomListWindow → 完整收尾（退房间 → 断连 → 停服务器）。
+                    var list = new RoomListWindow(session);
+                    if (list.ShowDialog() != true) break;   // 关闭房间列表 → 退出程序
                     }
 
+                    // 关闭来源：CloseIntentSource.RoomWindow → 只退出房间（不停服务器 / 不退出程序），
+                    // 关窗后回到本循环的房间列表；循环只有在这里退出时才会走 finally 的完整收尾。
                     var main = new MainWindow(session);
                     main.ShowDialog();
                     if (!main.IsLoggedOut) break;           // 直接关窗 → 退出程序；否则回到房间列表

@@ -32,21 +32,25 @@ public partial class LoginWindow : Window
 
         _embedded = new EmbeddedServerViewModel(_vm);
 
-        // 视图模型可能在非 UI 线程被改写（例如要清空密码），统一同步回两个 PasswordBox。
+        // 视图模型可能在非 UI 线程被改写（例如要清空密码），统一同步回密码框。
         _vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName != nameof(LoginViewModel.PasswordInput)) return;
-
             if (PasswordInput.Password != _vm.PasswordInput) PasswordInput.Password = _vm.PasswordInput;
-            if (EmbeddedPasswordInput.Password != _vm.PasswordInput)
-                EmbeddedPasswordInput.Password = _vm.PasswordInput;
         };
         _vm.LoginSucceeded += OnLoginSucceeded;
 
         // 上次停留的标签页（P1-5）；默认停在「创建内置服务器」。
         RestoreLastTab();
 
-        Loaded += (_, _) => (Tabs.SelectedItem == EmbeddedTab ? EmbeddedUsernameInput : UsernameInput).Focus();
+        // 内置页不再有输入框：焦点直接落在「一键开服」主按钮上，回车即可开服。
+        Loaded += (_, _) =>
+        {
+            var target = Tabs.SelectedItem == EmbeddedTab
+                ? (Control)EmbeddedPrimaryAction
+                : UsernameInput;
+            target.Focus();
+        };
 
         Closing += OnClosing;
 
@@ -112,18 +116,11 @@ public partial class LoginWindow : Window
 
         if (Tabs.SelectedItem == EmbeddedTab)
         {
-            // 内置页：回车优先「启动并进入」（没起服务器时），已启动则登录。
-            if (_embedded.CanStart && _embedded.StartAndEnterCommand.CanExecute(null))
+            // 内置页：回车 = 点「一键开服」（就绪后 = 「进入房间列表」）。
+            if (_embedded.CanOneClick && _embedded.OneClickCommand.CanExecute(null))
             {
                 e.Handled = true;
-                _embedded.StartAndEnterCommand.Execute(null);
-                return;
-            }
-
-            if (_embedded.LoginToEmbeddedCommand.CanExecute(null))
-            {
-                e.Handled = true;
-                _embedded.LoginToEmbeddedCommand.Execute(null);
+                _embedded.OneClickCommand.Execute(null);
             }
             return;
         }
@@ -139,13 +136,6 @@ public partial class LoginWindow : Window
         if (box.Password != _vm.PasswordInput) _vm.PasswordInput = box.Password;
     }
 
-    /// <summary>同上（Tab1，与 Tab2 共用同一份凭据）。</summary>
-    private void EmbeddedPasswordInput_OnPasswordChanged(object sender, RoutedEventArgs e)
-    {
-        var box = (PasswordBox)sender;
-        if (box.Password != _vm.PasswordInput) _vm.PasswordInput = box.Password;
-    }
-
-    /// <summary>登录界面也能打开设置（外观主题等）。</summary>
+    /// <summary>登录界面也能打开设置（外观主题等）；设置窗口会自行从本窗口取到会话。</summary>
     private void Settings_OnClick(object sender, RoutedEventArgs e) => SettingsWindow.Open(this);
 }

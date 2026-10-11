@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="clr-namespace:ClientGUI.Controls"
                     xmlns:vm="clr-namespace:ClientGUI.ViewModels">
 
     <!--
@@ -8,9 +9,16 @@
         颜色不在合并列表里：它由 ThemeManager 挂到 Application 级，本字典只通过
         {DynamicResource XxxBrush} 引用，才能做到运行期换主题。
     -->
+    <!--
+        v2.5.0：追加 AppShell.xaml（小程序页面骨架样式层）。
+        本字典被全部窗口合并，因此只需在这里加一行，所有窗口立刻能引用导航栏 / 卡片 /
+        通栏按钮等新样式键，无需改动任何一个窗口（架构决策 D1）。
+        必须排在 Controls.xaml 之后：AppShell 里的样式用 BasedOn 复用 Controls 的基础样式。
+    -->
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Converters.xaml" />
         <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Controls.xaml" />
+        <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/AppShell.xaml" />
         <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/GamePanels.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
@@ -59,6 +67,10 @@
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
+
+                        <!-- 称号胶囊（金色，无称号时自动 Collapsed，不留空框） -->
+                        <controls:TitleChip Text="{Binding Title}" Margin="6,0,0,0"
+                                            VerticalAlignment="Center" />
                     </StackPanel>
 
                     <TextBlock Text="{Binding Tags}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}"

@@ -92,12 +92,12 @@ public partial class HostSettingsWindow : Window
         if (!result.Ok || result.Settings == null)
         {
             SetStatus(string.IsNullOrEmpty(result.Message) ? "无法读取房间设置。" : result.Message, error: true);
-            SaveButton.IsEnabled = false;
+            PrimaryAction.IsEnabled = false;
             return;
         }
 
         ApplySettings(result.Settings);
-        SaveButton.IsEnabled = true;
+        PrimaryAction.IsEnabled = true;
         SetStatus("已读取房间设置。修改后点「保存设置」。", error: false);
     }
 
@@ -113,7 +113,9 @@ public partial class HostSettingsWindow : Window
         var name = string.IsNullOrEmpty(s.GameName) ? s.GameId : s.GameName;
 
         GameEmojiText.Text = emoji;
-        GameBadgeBrush.Color = ParseColor(s.GameAccent, "#7C8AA5");
+        // 房间带了游戏主题色就按主题色描边；否则保持 XAML 里那个来自主题的兜底色
+        // （v2.5.0 待办 T4：不再写死 #7C8AA5，浅色主题下也不会发灰）。
+        if (TryParseColor(s.GameAccent, out var accent)) GameBadgeBrush.Color = accent;
         GameBadge.ToolTip = $"本房间的游戏：{emoji} {name}";
 
         LayoutTab.Visibility = _hasPlayerConfig ? Visibility.Visible : Visibility.Collapsed;
@@ -123,16 +125,23 @@ public partial class HostSettingsWindow : Window
         Title = $"房主设置 · {emoji} {name}";
     }
 
-    /// <summary>十六进制 → Color；非法值回退 <paramref name="fallback"/>。</summary>
-    private static System.Windows.Media.Color ParseColor(string? hex, string fallback)
+    /// <summary>
+    /// 十六进制颜色串 → <see cref="System.Windows.Media.Color"/>；空或非法返回 false（此时保持控件原有的主题色）。
+    /// </summary>
+    private static bool TryParseColor(string? hex, out System.Windows.Media.Color color)
     {
-        foreach (var candidate in new[] { hex, fallback })
+        color = default;
+        if (string.IsNullOrWhiteSpace(hex)) return false;
+
+        try
         {
-            if (string.IsNullOrWhiteSpace(candidate)) continue;
-            try { return (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(candidate)!; }
-            catch { /* 换下一个候选 */ }
+            color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)!;
+            return true;
         }
-        return System.Windows.Media.Colors.Gray;
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -365,7 +374,7 @@ public partial class HostSettingsWindow : Window
         var clear = ClearPasswordBox.IsChecked == true;
         var newPassword = PasswordInput.Password;
 
-        SaveButton.IsEnabled = false;
+        PrimaryAction.IsEnabled = false;
         SetStatus("正在保存…", error: false);
 
         var result = await _client.UpdateRoomSettingsAsync(maxPlayers, newPassword.Length > 0 ? newPassword : null,
@@ -373,7 +382,7 @@ public partial class HostSettingsWindow : Window
 
         if (!result.Ok)
         {
-            SaveButton.IsEnabled = true;
+            PrimaryAction.IsEnabled = true;
             SetStatus(string.IsNullOrEmpty(result.Message) ? "保存失败。" : result.Message, error: true);
             return;
         }

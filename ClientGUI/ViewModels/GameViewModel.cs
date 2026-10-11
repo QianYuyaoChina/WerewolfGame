@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using ClientGUI.Services;
 using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
@@ -72,6 +73,9 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
         _client.StatusChanged += status => OnUi(() => OnStatusChanged(status));
         _client.ConnectionClosed += ex => OnUi(() => OnConnectionClosed(ex));
         _client.Reconnected += info => OnUi(() => OnReconnected(info));
+
+        // 内置服务器启停时同步「服务器运行中」胶囊（关主窗口不停服务器，界面要能看出来，PRD 8.6）。
+        EmbeddedServerService.Current.Changed += () => OnUi(NotifyServerStatusChanged);
 
         // 进入主窗口时已经登录并成功加入房间（登录/房间列表负责连接与加入）。
         IsConnected = _client.IsConnected;
@@ -295,6 +299,21 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
         : $"{_gameEmoji} {_gameName} · 客户端";
 
     public string EndpointText => IsJoined ? $"服务器：{_client.Endpoint}" : "";
+
+    // ---------------- 内置服务器运行状态（PRD 8.6） ----------------
+
+    /// <summary>本进程拉起的内置服务器是否正在运行。</summary>
+    public bool IsEmbeddedServerRunning => EmbeddedServerService.Current.IsRunning;
+
+    /// <summary>内置服务器胶囊的文案（未运行时为空，胶囊整体收起）。</summary>
+    public string EmbeddedServerText => IsEmbeddedServerRunning ? "内置服务器运行中" : "";
+
+    /// <summary>内置服务器状态变化时刷新胶囊（服务把回调切到 UI 线程后再进来一次）。</summary>
+    private void NotifyServerStatusChanged()
+    {
+        OnPropertyChanged(nameof(IsEmbeddedServerRunning));
+        OnPropertyChanged(nameof(EmbeddedServerText));
+    }
 
     // ==================== 房间信息 ====================
 
@@ -666,6 +685,7 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
             h.Add(p.IsConnected);
             h.Add(p.Tag);
             h.Add(p.TagColor);
+            h.Add(p.Title);   // 称号变了也要算「状态变了」，否则改完称号界面不刷新
         }
         return h.ToHashCode();
     }
@@ -689,7 +709,8 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
                 IsYou = p.IsYou,
                 IsConnected = p.IsConnected,
                 Tag = p.Tag,
-                TagColor = p.TagColor
+                TagColor = p.TagColor,
+                Title = p.Title ?? ""
             });
         }
 

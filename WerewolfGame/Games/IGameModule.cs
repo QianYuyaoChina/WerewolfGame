@@ -129,4 +129,15 @@ public interface IGameModule
     GameInfo Info { get; }
 
     IGameInstance CreateInstance(IGameContext context);
+
+    /// <summary>
+    /// 声明本游戏**允许管理员远程编辑**的数据资源（v2.5.0 第 5 条 / 架构 D5）。
+    ///
+    /// 默认实现返回空列表 —— 现有游戏模块**一行不用改**（C# 8 默认接口成员）；
+    /// 需要远程改词库的游戏（谁是卧底）在自己的模块里重写本方法即可。
+    /// 平台只按 <c>IGameCatalog</c> 遍历调用，不理解任何资源内容。
+    /// </summary>
+    /// <param name="dataRoot">服务器数据根目录（= 工作目录，与对局读取用的是同一个）。</param>
+    IReadOnlyList<IEditableDataResource> CreateEditableResources(string dataRoot)
+        => Array.Empty<IEditableDataResource>();
 }

@@ -21,6 +21,16 @@ namespace ClientGUI.Services;
 ///
 /// WPF 侧绝对不能用 <c>task.Wait()</c> / <c>.Result</c>：视图模型的回调要回 UI 线程，
 /// 阻塞 UI 线程会死锁 —— 因此用嵌套消息泵（<see cref="Dispatcher.PushFrame"/>）等待。
+///
+/// ─── v2.5.0 第 8 条（关主窗口 = 退出房间）之后的触发点分布 ───
+/// 三步编排与 8s 预算**一行未改**，只是触发点收拢了：
+/// <list type="bullet">
+///   <item><b>关主窗口</b>（<c>MainWindow</c>）：<c>CloseIntent.RequiresFullShutdown(RoomWindow) == false</c>
+///         → 只走与菜单「退出房间」完全相同的路径，<b>不调用本类</b>；退出后注销委托，
+///         将来真正收尾时第 ① 步自然跳过。</item>
+///   <item><b>关房间列表 / 退出程序 / 系统关机</b>：<c>RequiresFullShutdown == true</c> → 走本类完整三步。</item>
+/// </list>
+/// 两条路径都靠 <c>Interlocked</c> 幂等闸合并，不会重复离开房间。
 /// </summary>
 public static class AppShutdown
 {
@@ -87,6 +97,10 @@ public static class AppShutdown
     /// 在窗口 <c>Closing</c> 里调用：需要确认时弹一次。
     /// 返回 false 表示用户**取消** —— 调用方必须 <c>e.Cancel = true</c>，
     /// 且此时不能做任何破坏性动作（不退出房间、不停服务器、不关窗口）。
+    ///
+    /// ⚠ v2.5.0 第 8 条之后：只有**真正会停服务器**的入口才调用它 ——
+    /// 目前只剩「房间列表窗口」。房间内主窗口关窗**不再**调用
+    /// （关主窗口不停服务器，「会断开他们」的确认没有意义，PRD 8.7）。
     /// </summary>
     public static bool ConfirmClose(Window? owner)
     {

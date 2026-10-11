@@ -1,0 +1,108 @@
+<!--
+    服务器设置浮层正文（v2.5.0 第 5 条 · 仅管理员）：资源列表 + 全文编辑 + 保存。
+
+    与「修改密码」同一套做法：它是 **UserControl**，塞进宿主浮层（OverlayDialog）的卡片正文里，
+    不新增 Window 子类（S1）、不用 MessageBox（K11）。
+
+    平台侧不认识资源格式：格式说明与条数都是服务端（游戏模块）算出来下发的。
+    为了让编辑长文本舒服，编辑区用等宽字体 + 可滚动 + 关闭自动换行以外的一切都交给主题。
+
+    列表样式**内联**在这里（不复用 PlayerListBox / 不新增 AppShell 键）：
+    AppShell 的键数被 QA 断言锁死为 29 个（TODO T25），新增键会直接变红。
+-->
+<UserControl x:Class="ClientGUI.Views.ServerSettingsDialog"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:controls="clr-namespace:ClientGUI.Controls"
+             mc:Ignorable="d"
+             Foreground="{DynamicResource TextBrush}"
+             FontFamily="Microsoft YaHei UI, Segoe UI"
+             UseLayoutRounding="True">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <!-- ─── 空态：服务器上没有可编辑资源（狼人杀就是这种情况） ─── -->
+        <TextBlock x:Name="EmptyStateText" Style="{StaticResource FieldHint}" TextWrapping="Wrap"
+                   Visibility="{Binding HasItems, Converter={StaticResource InverseBoolToVisibility}}"
+                   Text="服务器当前没有可编辑的数据资源。（狼人杀暂不提供远程编辑；谁是卧底的房间要在服务器上启用该玩法才有词库可改。）" />
+
+        <StackPanel Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="可编辑资源" Style="{StaticResource FieldLabel}" />
+
+            <ListBox x:Name="ResourceList" MaxHeight="132"
+                     Background="Transparent" BorderThickness="0" Padding="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ItemsSource="{Binding Items}"
+                     SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                     SelectionChanged="ResourceList_OnSelectionChanged">
+                <!-- 选中态可见：资源只有一个时也会自动选中，用户一眼看出「正在编辑哪一份」。 -->
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0,0,0,4" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
+                                            Padding="10,8" BorderThickness="0">
+                                        <ContentPresenter />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bd" Property="Background"
+                                                    Value="{DynamicResource CardAltBrush}" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Bd" Property="Background"
+                                                    Value="{DynamicResource CardAltBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding DisplayName}" FontSize="14"
+                                       Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding GameName}" Style="{StaticResource ChipText}" Margin="8,0,0,0"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- 格式说明（服务端下发，原样展示） -->
+            <TextBlock Text="{Binding FormatHint}" Style="{StaticResource FieldHint}" Margin="0,12,0,0"
+                       TextWrapping="Wrap"
+                       Visibility="{Binding HasFormatHint, Converter={StaticResource BoolToVisibility}}" />
+
+            <!-- 全文编辑（整份覆盖，不做行级 diff） -->
+            <TextBlock Text="内容（整份保存）" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+            <TextBox x:Name="ContentEditor" Style="{StaticResource FlatTextBox}"
+                     Text="{Binding Content, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True" AcceptsTab="True"
+                     TextWrapping="NoWrap"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     MinHeight="200" MaxHeight="280"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" />
+
+            <TextBlock x:Name="CountTextBlock" Text="{Binding CountText}" Style="{StaticResource MinorText}"
+                       Margin="0,8,0,0"
+                       Visibility="{Binding HasCountText, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

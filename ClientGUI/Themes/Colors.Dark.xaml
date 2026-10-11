@@ -10,6 +10,10 @@
         由于 DynamicResource 会重新求值，已打开的窗口会立刻跟着变。
 
         新增颜色时请同时在 Colors.Light.xaml 里加上同名键。
+
+        v2.5.0 新增 17 个「语义键」：名字描述用途、不描述色相（详见 docs/v25/ARCHITECTURE.md §4.1）。
+        其中 Action* 三兄弟的取值**逐字沿用**现有 Accent*（用户裁定：主色保持现有蓝紫，不引入微信绿），
+        因此界面上看不出换色，但「主操作按钮」与「选中态 / 强调文字」从此语义分离，将来可各自演进。
     -->
 
     <!-- 背景与容器 -->
@@ -48,4 +52,38 @@
     <SolidColorBrush x:Key="ErrorBrush" Color="#FFFF8A8A" />
     <SolidColorBrush x:Key="PhaseBrush" Color="#FFB79CFF" />
     <SolidColorBrush x:Key="WarnBrush" Color="#FFFFCE6B" />
+
+    <!-- ═══════════════ v2.5.0 小程序骨架：语义键 ═══════════════ -->
+    <!-- 页面与容器 -->
+    <SolidColorBrush x:Key="PageBgBrush" Color="#FF0E1117" />     <!-- 页面级背景（卡片外的底） -->
+    <SolidColorBrush x:Key="NavBarBgBrush" Color="#FF181D28" />   <!-- 导航栏底（与卡片区分） -->
+    <SolidColorBrush x:Key="NavBarTextBrush" Color="#FFE8EDF6" /> <!-- 导航标题文字 -->
+    <SolidColorBrush x:Key="DividerBrush" Color="#FF2C3546" />    <!-- 列表分隔线（1px） -->
+    <SolidColorBrush x:Key="CardAltBrush" Color="#FF1A2029" />    <!-- 卡片内次级区块 / 分组头 -->
+
+    <!-- 主操作（取值沿用 Accent*：保留现有蓝主色，不引入微信绿） -->
+    <SolidColorBrush x:Key="ActionBrush" Color="#FF5B8DEF" />
+    <SolidColorBrush x:Key="ActionTextBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="ActionHoverBrush" Color="#FF6E9CF5" />
+    <SolidColorBrush x:Key="ActionPressedBrush" Color="#FF4A78D6" />
+    <SolidColorBrush x:Key="ActionDisabledBrush" Color="#FF3A4252" />
+
+    <!-- 称号（金）：唯一新增的色相 -->
+    <SolidColorBrush x:Key="TitleTextBrush" Color="#FFFFD98A" />
+    <SolidColorBrush x:Key="TitleBorderBrush" Color="#FFE0B96B" />
+    <SolidColorBrush x:Key="TitleBgBrush" Color="#33FFD98A" />
+
+    <!-- 浮层与表单 -->
+    <SolidColorBrush x:Key="MaskBrush" Color="#99000000" />        <!-- 页面内浮层遮罩 -->
+    <SolidColorBrush x:Key="PlaceholderBrush" Color="#FF6F7C93" /> <!-- 输入框占位文字 -->
+
+    <!-- 通用胶囊 -->
+    <SolidColorBrush x:Key="ChipTextBrush" Color="#FFC3CCDC" />
+    <SolidColorBrush x:Key="ChipBorderBrush" Color="#FF3A4459" />
+
+    <!--
+        房主设置窗口「游戏徽章」描边的兜底色：房间没带主题色时用主题提供的中性色，
+        避免在 XAML 里写死 #7C8AA5（待办 T4）。
+    -->
+    <Color x:Key="GameBadgeFallbackColor">#FF7C8AA5</Color>
 </ResourceDictionary>

@@ -58,4 +58,11 @@ public sealed class UndercoverGameModule : IGameModule
 
     /// <inheritdoc />
     public IGameInstance CreateInstance(IGameContext context) => new UndercoverGameInstance(Info, context);
+
+    /// <summary>
+    /// 本游戏允许管理员远程编辑的数据资源：只有词库一个（v2.5.0 第 5 条）。
+    /// 平台只拿到「资源接口」，不知道它其实是 <c>words.undercover.txt</c>。
+    /// </summary>
+    public IReadOnlyList<IEditableDataResource> CreateEditableResources(string dataRoot)
+        => new IEditableDataResource[] { new UndercoverWordResource(dataRoot) };
 }

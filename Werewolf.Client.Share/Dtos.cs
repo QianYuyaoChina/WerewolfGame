@@ -17,6 +17,12 @@ public class PlayerDto
 
     /// <summary>通用：标签颜色（十六进制，如 "#FFA07A"）；可空，空则由界面用主题默认色。</summary>
     public string? TagColor { get; set; }
+
+    /// <summary>
+    /// 玩家的**称号**（v2.5.0 第 4 条）：由服务端按账号权威存储，随房间状态自然下发。
+    /// null / 空 = 无称号（界面不渲染称号胶囊）。
+    /// </summary>
+    public string? Title { get; set; }
 }
 
 /// <summary>

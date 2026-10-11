@@ -28,15 +28,18 @@ public class GameHub : Hub
     private readonly AccountStore _accounts;
     private readonly CryptoSessionStore _sessions;
     private readonly EncryptedChannel _channel;
+    private readonly EditableDataRegistry _resources;
 
     public GameHub(RoomManager rooms, IGameCatalog catalog, AccountStore accounts,
-                   CryptoSessionStore sessions, EncryptedChannel channel)
+                   CryptoSessionStore sessions, EncryptedChannel channel,
+                   EditableDataRegistry resources)
     {
         _rooms = rooms;
         _catalog = catalog;
         _accounts = accounts;
         _sessions = sessions;
         _channel = channel;
+        _resources = resources;
     }
 
     // ==================== 密钥协商 + 身份认证 ====================
@@ -142,6 +145,13 @@ public class GameHub : Hub
                 Ops.HostSettings => HandleHostSettings(),
                 Ops.RoomSettings => HandleRoomSettings(request.Payload),
                 Ops.ResetInvite => HandleResetInvite(),
+                Ops.Egg => HandleEgg(request.Payload),
+                Ops.SetTitle => await HandleSetTitleAsync(request.Payload),
+                Ops.Session => HandleSession(),
+                Ops.ChangePassword => HandleChangePassword(request.Payload),
+                Ops.DataResources => HandleDataResources(),
+                Ops.DataResourceGet => HandleDataResourceGet(request.Payload),
+                Ops.DataResourceSave => HandleDataResourceSave(request.Payload),
                 Ops.Start => await HandleStartAsync(),
                 Ops.Chat => await HandleChatAsync(request.Payload),
                 Ops.Ping => RpcReply.Success(),
@@ -168,21 +178,49 @@ public class GameHub : Hub
 
         if (string.IsNullOrWhiteSpace(username)) return RpcReply.Error("用户名不能为空");
         if (username.Length > 20) return RpcReply.Error("用户名过长（最多 20 字符）");
-        if (password.Length < 3) return RpcReply.Error("密码至少 3 位");
+        if (password.Length < PasswordRules.MinLength)
+            return RpcReply.Error(ServerMessages.PasswordMinLength(PasswordRules.MinLength));
 
         // ---- 账号：首次即注册；否则校验 ----
+        // ⚠️ 用户裁定（v2.5.0）：管理员是**真正的登录账户**，用默认密码必须能正常登录成功。
+        //    「保留用户名」只作用于**注册**路径（别人抢注 admin 才拒绝），
+        //    登录路径**绝不能**复用这条拦截，否则 admin 会被自己人挡在门外。
         if (!_accounts.Exists(username))
         {
-            var err = _accounts.Register(username, password);
-            if (err != null) return RpcReply.Error(err);
+            if (_accounts.IsAdmin(username))
+            {
+                // 兜底：正常情况下组合根启动时已 seed（EnsureAdmin）。
+                // 这里再兜一次，保证「第一次登录的就是 admin」也能成功。
+                _accounts.EnsureAdmin();
+                if (!_accounts.Verify(username, password))
+                    return RpcReply.Error(ServerMessages.WrongPassword);
+            }
+            else
+            {
+                var err = _accounts.Register(username, password);
+                if (err != null) return RpcReply.Error(err);
+            }
         }
         else if (!_accounts.Verify(username, password))
         {
-            return RpcReply.Error("密码错误");
+            return RpcReply.Error(ServerMessages.WrongPassword);
         }
 
         _rooms.BindIdentity(Context.ConnectionId, username);
-        return RpcReply.Success(ServerMessages.Ok);
+
+        // 登录回执顺带下发「是否管理员 / 当前称号」，客户端不必再为它们各发一次请求。
+        var ack = new JoinAckPayload
+        {
+            IsAdmin = _accounts.IsAdmin(username),
+            Title = _accounts.TitleOf(username)
+        };
+
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = ServerMessages.Ok,
+            Payload = JsonSerializer.SerializeToNode(ack, Json)
+        };
     }
 
     /// <summary>房间列表（只读）：返回所有房间摘要。</summary>
@@ -389,6 +427,202 @@ public class GameHub : Hub
             Msg = "rotated",
             Payload = room == null ? null : JsonSerializer.SerializeToNode(room.ToHostSettings(), Json)
         };
+    }
+
+    // ==================== 会话身份 / 彩蛋 / 称号（v2.5.0） ====================
+
+    /// <summary>
+    /// 查询自己的会话身份（用户名 / 是否管理员 / 当前称号）。
+    /// 管理员标记**只由服务端**给出，客户端不得自行推断（PRD 5.3）。
+    /// </summary>
+    private RpcReply HandleSession()
+    {
+        var username = _rooms.GetUsername(Context.ConnectionId);
+        if (string.IsNullOrEmpty(username)) return RpcReply.Error(ServerMessages.NotLoggedIn);
+
+        var dto = new SessionInfoDto
+        {
+            Username = username,
+            IsAdmin = _accounts.IsAdmin(username),
+            Title = _accounts.TitleOf(username)
+        };
+
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(dto, Json)
+        };
+    }
+
+    /// <summary>
+    /// 彩蛋口令。**永远不返回错误**：未命中也是成功 + 一条占位文案（PRD 3.6）。
+    /// 彩蛋内容全部由服务端下发，客户端不内嵌任何文案（PRD 3.5）。
+    /// </summary>
+    private RpcReply HandleEgg(JsonNode? payload)
+    {
+        var req = payload?.Deserialize<EggPayload>(Json) ?? new EggPayload();
+        var code = (req.Code ?? "").Trim();
+        var username = _rooms.GetUsername(Context.ConnectionId);
+
+        var matched = !string.IsNullOrEmpty(username)
+                      && string.Equals(code, EggCodes.Surprise, StringComparison.OrdinalIgnoreCase);
+
+        var reply = matched
+            ? new EggReplyPayload
+            {
+                Matched = true,
+                Kind = EggKinds.Title,
+                Message = ServerMessages.EggTitleUnlocked,
+                Title = _accounts.TitleOf(username)
+            }
+            : new EggReplyPayload
+            {
+                Matched = false,
+                Kind = "",
+                Message = ServerMessages.EggPending,
+                Title = ""
+            };
+
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(reply, Json)
+        };
+    }
+
+    /// <summary>
+    /// 设置 / 清除称号。**只能改自己的**：一律按「连接绑定的用户名」写入，
+    /// 请求里的任何用户名字段都不存在也无处可传（<see cref="SetTitlePayload"/> 只有 Title）。
+    /// 校验口径与客户端共用 <see cref="TitleRules"/>（PRD 4.7 / 4.8）。
+    /// </summary>
+    private async Task<RpcReply> HandleSetTitleAsync(JsonNode? payload)
+    {
+        var username = _rooms.GetUsername(Context.ConnectionId);
+        if (string.IsNullOrEmpty(username)) return RpcReply.Error(ServerMessages.NotLoggedIn);
+
+        var req = payload?.Deserialize<SetTitlePayload>(Json) ?? new SetTitlePayload();
+        var title = TitleRules.Normalize(req.Title);
+
+        var (ok, error) = TitleRules.Validate(title);
+        if (!ok) return RpcReply.Error(error);
+
+        _accounts.SetTitle(username, title);
+
+        // 房间里的人立刻看到新称号：称号随房间状态自然下发，这里补一次广播（零额外往返）。
+        var room = _rooms.GetRoomByConnection(Context.ConnectionId);
+        if (room != null) await room.BroadcastStateAsync();
+
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = title.Length == 0 ? ServerMessages.TitleCleared : ServerMessages.TitleSaved,
+            Payload = JsonSerializer.SerializeToNode(new SetTitleAckPayload { Title = title }, Json)
+        };
+    }
+
+    // ==================== 修改密码（v2.5.0 第 7 条） ====================
+
+    /// <summary>
+    /// 修改**自己**的密码。请求里不含用户名 —— 一律按「连接绑定的用户名」处理
+    /// （与称号同一套「只能改自己的」口径）。
+    /// 成功**不断开连接、不强制重登**：当前会话继续可用。
+    /// </summary>
+    private RpcReply HandleChangePassword(JsonNode? payload)
+    {
+        var username = _rooms.GetUsername(Context.ConnectionId);
+        if (string.IsNullOrEmpty(username)) return RpcReply.Error(ServerMessages.NotLoggedIn);
+
+        var req = payload?.Deserialize<ChangePasswordPayload>(Json) ?? new ChangePasswordPayload();
+        var error = _accounts.ChangePassword(username, req.OldPassword, req.NewPassword);
+        if (error != null) return RpcReply.Error(error);
+
+        return RpcReply.Success(ServerMessages.PasswordChanged);
+    }
+
+    // ==================== 服务器数据资源（v2.5.0 第 5 条 · 仅管理员） ====================
+
+    /// <summary>
+    /// 管理员校验的**唯一**门槛：所有管理员 op 的入口第一句都调它。
+    /// 判定只认服务端会话身份（<see cref="AccountStore.IsAdmin"/>），客户端自称一律不采信（K5）。
+    /// </summary>
+    private bool IsAdminCaller()
+        => _accounts.IsAdmin(_rooms.GetUsername(Context.ConnectionId));
+
+    /// <summary>可编辑资源清单（仅管理员）。狼人杀没有可编辑资源 → 空列表，界面给空态文案。</summary>
+    private RpcReply HandleDataResources()
+    {
+        if (!IsAdminCaller()) return RpcReply.Error(ServerMessages.AdminOnly);
+
+        var list = new DataResourceListPayload { Items = _resources.List().ToList() };
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(list, Json)
+        };
+    }
+
+    /// <summary>取某个资源的全文（仅管理员）。</summary>
+    private RpcReply HandleDataResourceGet(JsonNode? payload)
+    {
+        if (!IsAdminCaller()) return RpcReply.Error(ServerMessages.AdminOnly);
+
+        var req = payload?.Deserialize<DataResourceRefPayload>(Json) ?? new DataResourceRefPayload();
+        if (!_resources.TryGet(req.Id, out var resource))
+            return RpcReply.Error(ServerMessages.ResourceNotFound);
+
+        string content;
+        try { content = resource.Load(); }
+        catch (Exception ex) { return RpcReply.Error("无法读取内容：" + ex.Message); }
+
+        var check = resource.Validate(content);
+        var dto = new DataResourceContentPayload
+        {
+            Id = req.Id,
+            Content = content,
+            Digest = EditableDataRegistry.DigestOf(content),
+            Count = check.Ok ? check.Count : 0,
+            FormatHint = resource.FormatHint,
+            DisplayName = resource.DisplayName
+        };
+
+        return new RpcReply
+        {
+            Ok = true,
+            Msg = "",
+            Payload = JsonSerializer.SerializeToNode(dto, Json)
+        };
+    }
+
+    /// <summary>
+    /// 整份提交某个资源（仅管理员）：校验前置 → 原子落盘；失败整份不落盘并给出人话原因。
+    /// **下一局生效**：正在进行的对局继续用内存里的旧内容，不重启服务器。
+    /// </summary>
+    private RpcReply HandleDataResourceSave(JsonNode? payload)
+    {
+        if (!IsAdminCaller()) return RpcReply.Error(ServerMessages.AdminOnly);
+
+        var req = payload?.Deserialize<DataResourceSavePayload>(Json) ?? new DataResourceSavePayload();
+        if (!_resources.TryGet(req.Id, out var resource))
+            return RpcReply.Error(ServerMessages.ResourceNotFound);
+
+        var write = resource.Save(req.Content);
+        var result = new DataResourceSaveResult
+        {
+            Ok = write.Ok,
+            Count = write.Count,
+            Message = write.Ok ? ServerMessages.ResourceSaved(write.Count) : write.Error
+        };
+
+        var reply = new RpcReply
+        {
+            Ok = write.Ok,
+            Msg = result.Message,
+            Payload = JsonSerializer.SerializeToNode(result, Json)
+        };
+        return reply;
     }
 
     private async Task<RpcReply> HandleStartAsync()

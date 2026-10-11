@@ -56,6 +56,31 @@ public static class Ops
     /// <summary>查询「服务器当前可用游戏」（只读）。</summary>
     public const string GameList = "gamelist";
 
+    // ---------------- 账号与彩蛋（v2.5.0） ----------------
+
+    /// <summary>查询自己的会话身份（用户名 / 是否管理员 / 当前称号）。</summary>
+    public const string Session = "session";
+
+    /// <summary>设置 / 清除**自己**的称号（请求里不带用户名，服务端按会话身份写入）。</summary>
+    public const string SetTitle = "settitle";
+
+    /// <summary>彩蛋口令：内容由服务端返回，客户端不内嵌任何彩蛋文案。</summary>
+    public const string Egg = "egg";
+
+    // ---------------- 密码与服务器数据资源（v2.5.0 第 5 / 7 条） ----------------
+
+    /// <summary>修改**自己**的密码（旧密码 + 新密码）。请求里不带用户名，服务端按会话身份处理。</summary>
+    public const string ChangePassword = "changepassword";
+
+    /// <summary>可编辑数据资源清单（**仅管理员**）。</summary>
+    public const string DataResources = "dataresources";
+
+    /// <summary>取某个可编辑资源的全文（**仅管理员**）。</summary>
+    public const string DataResourceGet = "dataresourceget";
+
+    /// <summary>整份提交某个可编辑资源，原子落盘（**仅管理员**）。</summary>
+    public const string DataResourceSave = "dataresourcesave";
+
     // ⚠️ 注意：night / vote / hunter 不再是框架 op；它们由狼人杀模块自己的
     //    WerewolfOps 声明，走 GameHub 的「默认分支」路由到当前房间的游戏实例。
 }
@@ -103,7 +128,97 @@ public static class ServerMessages
     /// <summary>邀请令牌无效（邀请码已失效或被重置）。</summary>
     public const string InviteExpired = "邀请码已失效，请向房主要一个新的";
 
+    // ---------------- 管理员与账号（v2.5.0） ----------------
+
+    /// <summary>非管理员发起管理员请求。</summary>
+    public const string AdminOnly = "仅管理员可操作";
+
+    /// <summary>普通注册流程抢占了管理员保留用户名。</summary>
+    public const string AdminReserved = "该用户名为系统保留，请换一个";
+
+    // ---------------- 称号（v2.5.0 第 4 条） ----------------
+
+    /// <summary>称号已保存。</summary>
+    public const string TitleSaved = "称号已保存";
+
+    /// <summary>称号已清除。</summary>
+    public const string TitleCleared = "称号已清除";
+
+    /// <summary>称号过长。</summary>
+    public const string TitleTooLong = "称号太长（最多 8 个汉字或 16 个字符）";
+
+    /// <summary>称号含换行或控制字符。</summary>
+    public const string TitleBadChars = "称号不能包含换行或控制字符";
+
+    // ---------------- 彩蛋（v2.5.0 第 3 条） ----------------
+
+    /// <summary>口令未命中时的占位文案（**不报错**，内容待定）。</summary>
+    public const string EggPending = "这个彩蛋还在准备中 🐣";
+
+    /// <summary>命中 surprise：称号编辑已解锁。</summary>
+    public const string EggTitleUnlocked = "称号编辑已解锁";
+
+    /// <summary>与服务器不通（客户端侧兜底文案，不弹异常堆栈）。</summary>
+    public const string NetworkUnreachable = "连不上服务器，请检查网络后重试";
+
+    // ---------------- 修改密码（v2.5.0 第 7 条，TODO T7：规则常量单一来源） ----------------
+
+    /// <summary>旧密码不正确。</summary>
+    public const string OldPasswordWrong = "旧密码错误";
+
+    /// <summary>新密码与旧密码相同（等于没改）。</summary>
+    public const string PasswordSameAsOld = "新密码不能与旧密码相同";
+
+    /// <summary>新密码与确认密码不一致（客户端就地提示，不发请求）。</summary>
+    public const string PasswordMismatch = "两次输入的新密码不一致";
+
+    /// <summary>修改成功（**不强制重登**，当前会话继续可用）。</summary>
+    public const string PasswordChanged = "密码已修改，下次登录请用新密码";
+
+    /// <summary>密码长度下限（服务端与客户端共用，避免两处各写一个数字）。</summary>
+    public static string PasswordMinLength(int n) => $"密码至少 {n} 位";
+
+    // ---------------- 服务器数据资源（v2.5.0 第 5 条） ----------------
+
+    /// <summary>请求的资源不存在（或服务器当前没有可编辑资源）。</summary>
+    public const string ResourceNotFound = "该数据资源不存在";
+
+    /// <summary>提交的内容里一行有效内容都没有。</summary>
+    public const string ResourceEmpty = "至少要有一行有效内容";
+
+    /// <summary>保存失败（磁盘等原因），服务器上的内容未改动。</summary>
+    public const string ResourceSaveFailed = "保存失败，服务器数据未改动";
+
+    /// <summary>保存成功（含有效条数）。</summary>
+    public static string ResourceSaved(int n) => $"已保存 {n} 条，下一局生效";
+
+    /// <summary>某一行格式不对（整份不落盘）。</summary>
+    public static string ResourceLineError(int line) => $"第 {line} 行格式不对，整份未保存";
+
     public static string RoomFull(int max) => $"房间已满（最多 {max} 人）";
+}
+
+/// <summary>
+/// 密码规则的**唯一**口径（v2.5.0 第 7 条 / TODO T7）：
+/// 三端（服务端账号存储、服务端 op 入口、客户端对话框）都从这里取，
+/// 避免「服务端说 6 位、客户端说 3 位」这类前后台规则漂移。
+/// </summary>
+public static class PasswordRules
+{
+    /// <summary>密码长度下限（与既有注册口径一致）。</summary>
+    public const int MinLength = 3;
+
+    /// <summary>密码长度上限（防止有人塞一篇小说进来）。</summary>
+    public const int MaxLength = 64;
+
+    /// <summary>校验新密码的格式（长度）。返回 (是否通过, 错误文案)。</summary>
+    public static (bool ok, string error) Validate(string? password)
+    {
+        var text = password ?? "";
+        if (text.Length < MinLength) return (false, ServerMessages.PasswordMinLength(MinLength));
+        if (text.Length > MaxLength) return (false, $"密码太长（最多 {MaxLength} 位）");
+        return (true, "");
+    }
 }
 
 /// <summary>房间在列表中的状态（服务端是唯一权威，客户端只做展示映射）。</summary>
@@ -354,6 +469,11 @@ public sealed class RoomInfoDto
 
     /// <summary>房主用户名（无则 ""）。</summary>
     public string Host { get; set; } = "";
+
+    /// <summary>
+    /// 房主的**称号**（v2.5.0 第 4 条）：随房间列表自然下发，零额外往返。空 = 无称号。
+    /// </summary>
+    public string HostTitle { get; set; } = "";
 }
 
 /// <summary>房间列表结果（同时用作 roomlist 的 Payload 与客户端返回类型）。</summary>

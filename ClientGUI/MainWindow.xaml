@@ -10,17 +10,25 @@
         Title="{Binding WindowTitle}"
         Height="780" Width="1220" MinHeight="640" MinWidth="1000"
         WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource BgBrush}"
+        Background="{DynamicResource PageBgBrush}"
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         TextOptions.TextFormattingMode="Ideal"
         UseLayoutRounding="True"
         KeyDown="MainWindow_OnKeyDown">
 
+    <!--
+        v2.5.0 迁移范围（架构 D1 / C3）：顶部导航栏 + 底部状态条 + 三栏容器。
+        本窗口**不套 375 手机逻辑宽度** —— 冒烟会对它 Measure(1220,780)，且它最小宽度 1000；
+        三栏内部细节（游戏专属面板）列 P1，本轮只让容器跟上。
+
+        桌面端菜单栏（PRD Q13）保留但风格化：它承载 Ctrl+, 等快捷键与显隐开关，
+        不作为移植目标；新增页面一律用「导航栏 + 内容 + 底部操作条」骨架。
+    -->
     <Window.Resources>
         <ResourceDictionary>
             <!-- 用 pack URI 定位，保证从任意工作目录启动、或被其他宿主加载时都能解析。
-                 Panels 内部已合并 Converters + Controls；颜色由 ThemeManager 挂在 Application 级。 -->
+                 Panels 内部已合并 Converters + Controls + AppShell；颜色由 ThemeManager 挂在 Application 级。 -->
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
             </ResourceDictionary.MergedDictionaries>
@@ -29,10 +37,10 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />  <!-- 菜单栏 -->
-            <RowDefinition Height="Auto" />  <!-- 标题栏 -->
-            <RowDefinition Height="*" />     <!-- 主区域 -->
-            <RowDefinition Height="Auto" />  <!-- 状态栏 -->
+            <RowDefinition Height="Auto" />  <!-- 菜单栏（桌面端保留） -->
+            <RowDefinition Height="Auto" />  <!-- 导航栏 -->
+            <RowDefinition Height="*" />     <!-- 主区域（三栏） -->
+            <RowDefinition Height="Auto" />  <!-- 底部状态条 -->
         </Grid.RowDefinitions>
 
         <!-- ═══════════════ 菜单栏 ═══════════════ -->
@@ -43,7 +51,7 @@
             真正的游戏动作（开始、退出房间、清空消息）仍走视图模型命令。
         -->
         <Border Grid.Row="0" Background="{DynamicResource PanelBrush}"
-                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1">
+                BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1">
             <Menu Style="{StaticResource FlatMenu}"
                   ItemContainerStyle="{StaticResource FlatMenuItem}">
                 <MenuItem Header="游戏(_G)">
@@ -79,73 +87,90 @@
             </Menu>
         </Border>
 
-        <!-- ═══════════════ 标题栏 ═══════════════ -->
-        <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" Padding="18,12"
-                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,0,0,1">
+        <!-- ═══════════════ 导航栏（*|Auto|*：左游戏标识 / 中房间标题 / 右状态与操作；标题几何居中） ═══════════════ -->
+        <Border x:Name="NavBar" Grid.Row="1" Style="{StaticResource NavBarPanel}">
             <Grid>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- 游戏标识：图标 + 中文名 + **游戏主题色**，不同游戏的房间一眼就能分辨。 -->
-                    <Border CornerRadius="7" Padding="11,4" BorderThickness="1.4"
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 游戏标识：图标 + 中文名 + **游戏主题色**，不同游戏的房间一眼就能分辨。 -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal"
+                            HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <Border CornerRadius="999" Padding="12,4" BorderThickness="1"
                             BorderBrush="{Binding GameAccentHex, Converter={StaticResource HexToBrush}}">
-                        <TextBlock Text="{Binding GameLabelText}" FontSize="15.5" FontWeight="Bold"
+                        <TextBlock Text="{Binding GameLabelText}" FontSize="15" FontWeight="Bold"
                                    Foreground="{Binding GameAccentHex, Converter={StaticResource HexToBrush}}" />
                     </Border>
-                    <TextBlock Text="客户端" FontSize="12" Margin="9,2,0,0" VerticalAlignment="Center"
-                               Foreground="{DynamicResource MutedBrush}" />
                 </StackPanel>
 
-                <!--
-                    右上角统一放「设置」类入口（不再分散到「游戏 / 视图」两个菜单里）：
-                    · 设置：外观主题与主界面（Ctrl + ,）
-                    · 房主设置：房间人数 / 密码 / 身份配置 / 邀请码（仅房主可用）
-                    右侧的当前局势与「退出房间」只在进房后显示。
-                -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <!-- 居中标题 -->
+                <TextBlock Grid.Column="1" x:Name="NavTitleText" Text="{Binding RoomHeaderText}"
+                           Style="{StaticResource NavTitleText}" />
 
-                    <Button Content="⚙ 设置" Style="{StaticResource FlatButton}" Padding="12,6" Margin="0,0,8,0"
+                <!--
+                    右侧：设置类入口（设置 / 房主设置）+ 进房后的当前局势与「退出房间」。
+                -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+
+                    <Button Content="设置" Style="{StaticResource NavIconButton}"
                             Click="Menu_Settings_OnClick" ToolTip="外观与主界面设置（快捷键 Ctrl + ,）" />
-                    <Button Content="👑 房主设置" Style="{StaticResource FlatButton}" Padding="12,6" Margin="0,0,12,0"
+                    <Button Content="房主设置" Style="{StaticResource NavIconButton}" Margin="4,0,0,0"
                             Click="Menu_HostSettings_OnClick" IsEnabled="{Binding IsHost}"
                             ToolTip="房间人数 / 密码 / 邀请码（仅房主；身份等玩法配置按游戏显示）" />
 
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                                 Visibility="{Binding IsJoined, Converter={StaticResource BoolToVisibility}}">
-                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
-                            BorderThickness="1" BorderBrush="{DynamicResource AccentBrush}"
-                            Visibility="{Binding HasRoomInfo, Converter={StaticResource BoolToVisibility}}">
-                        <TextBlock Text="{Binding RoomHeaderText}" FontSize="12.5" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TextBrush}" />
-                    </Border>
-                    <!-- 游戏自定义状态胶囊（阶段 / 天数 / 倒计时等）：由插槽面板 Game.Chips 提供 -->
-                    <ItemsControl ItemsSource="{Binding Game.Chips}" VerticalAlignment="Center">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:StatusChip}">
-                                <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0">
-                                    <TextBlock Text="{Binding Text}" FontSize="12.5" FontWeight="SemiBold"
-                                               Foreground="{Binding ColorHex, Converter={StaticResource HexToBrush}}" />
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <Border Background="{DynamicResource ChipBrush}" CornerRadius="5" Padding="10,5" Margin="0,0,8,0"
-                            BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}">
-                        <TextBlock Text="{Binding ConnectionStatus}" FontSize="12" Foreground="{DynamicResource MutedBrush}" />
-                    </Border>
-                    <Button Content="退出房间" Style="{StaticResource FlatButton}" Padding="12,6"
-                            Command="{Binding DisconnectCommand}"
-                            IsEnabled="{Binding CanLeaveRoom}" />
+                        <!--
+                            服务器运行胶囊（PRD 8.6）：关主窗口**不停**内置服务器，
+                            因此这里要能一眼看出「服务器还在跑」。
+                            放在「已进房」这一组里：MainWindow 只在房间里出现，
+                            未进房时整组收起，导航栏宽度不变。
+                        -->
+                        <Border Style="{StaticResource StatusChipBorder}"
+                                Visibility="{Binding IsEmbeddedServerRunning, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{Binding EmbeddedServerText}" Style="{StaticResource ChipText}"
+                                       FontWeight="SemiBold" />
+                        </Border>
+                        <Border Style="{StaticResource StatusChipBorder}" Margin="12,0,0,0"
+                                Visibility="{Binding HasRoomInfo, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="{Binding RoomHeaderText}" Style="{StaticResource ChipText}"
+                                       FontWeight="SemiBold" />
+                        </Border>
+                        <!-- 游戏自定义状态胶囊（阶段 / 天数 / 倒计时等）：由插槽面板 Game.Chips 提供 -->
+                        <ItemsControl ItemsSource="{Binding Game.Chips}" VerticalAlignment="Center"
+                                      Margin="8,0,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:StatusChip}">
+                                    <Border Style="{StaticResource StatusChipBorder}" Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding Text}" Style="{StaticResource ChipText}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{Binding ColorHex, Converter={StaticResource HexToBrush}}" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Border Style="{StaticResource StatusChipBorder}">
+                            <TextBlock Text="{Binding ConnectionStatus}" Style="{StaticResource ChipText}" />
+                        </Border>
+                        <Button Content="退出房间" Style="{StaticResource NavIconButton}" Margin="8,0,0,0"
+                                Command="{Binding DisconnectCommand}"
+                                IsEnabled="{Binding CanLeaveRoom}" />
                     </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- ═══════════════ 主区域（三栏） ═══════════════ -->
-        <Grid Grid.Row="2" Margin="14"
+        <Grid Grid.Row="2" Margin="12"
               Visibility="{Binding ShowGamePanel, Converter={StaticResource BoolToVisibility}}">
             <Grid.ColumnDefinitions>
                 <!-- 列宽与面板可见性由「视图」菜单驱动（见 MainWindow.xaml.cs）。 -->
@@ -159,9 +184,8 @@
             <views:ActionPanel x:Name="ActionsView" Grid.Column="2" />
         </Grid>
 
-        <!-- ═══════════════ 状态栏 ═══════════════ -->
-        <Border Grid.Row="3" Background="{DynamicResource PanelBrush}" Padding="16,7"
-                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,0">
+        <!-- ═══════════════ 底部状态条 ═══════════════ -->
+        <Border Grid.Row="3" Style="{StaticResource FooterBar}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -171,17 +195,17 @@
 
                 <!-- 连接指示灯 + 延迟：由视图模型按“已连接 / 重连中 / 未连接”给出配色与文案。 -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock FontSize="11.5" Foreground="{Binding ConnectionIndicatorBrush}"
+                    <TextBlock Style="{StaticResource MinorText}" Foreground="{Binding ConnectionIndicatorBrush}"
                                Text="{Binding ConnectionIndicatorText}" />
-                    <TextBlock FontSize="11.5" Margin="12,0,0,0" Foreground="{DynamicResource MutedBrush}"
+                    <TextBlock Style="{StaticResource MinorText}" Margin="12,0,0,0"
                                Text="{Binding LatencyText}"
                                Visibility="{Binding HasLatency, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
 
-                <TextBlock Grid.Column="1" Text="{Binding LogStatus}" FontSize="11.5" Margin="16,0"
-                           TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding LogStatus}" Style="{StaticResource MinorText}"
+                           Margin="16,0" TextTrimming="CharacterEllipsis" />
 
-                <TextBlock Grid.Column="2" FontSize="11" Foreground="{DynamicResource FaintBrush}"
+                <TextBlock Grid.Column="2" Style="{StaticResource FootnoteText}"
                            Text="{Binding VersionText}" ToolTip="客户端版本" />
             </Grid>
         </Border>

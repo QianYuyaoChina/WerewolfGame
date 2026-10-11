@@ -1,6 +1,9 @@
 <!--
     注意：窗口根元素上的 Foreground/Background 必须用 DynamicResource。
     静态资源在解析这两个属性时还看不到本元素下面声明的 Resources。
+
+    v2.5.0 小程序骨架：导航栏 56（居中标题）+ 灰底上的白色卡片内容区 + 通栏底部主按钮。
+    本窗口依然是 Window 子类（结构契约 S1：冒烟会按无参构造实例化），只改外观。
 -->
 <Window x:Class="ClientGUI.Views.KeepRoomWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -9,11 +12,11 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         mc:Ignorable="d"
         Title="退出房间"
-        Height="378" Width="456"
+        Height="505" Width="456"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource BgBrush}"
+        Background="{DynamicResource PageBgBrush}"
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         UseLayoutRounding="True"
@@ -27,67 +30,58 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid Margin="26,22">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <!-- 标题 -->
-            <RowDefinition Height="Auto" />
-            <!-- 说明 -->
-            <RowDefinition Height="*" />
-            <!-- 两种选择的区别 -->
-            <RowDefinition Height="Auto" />
-            <!-- 按钮 -->
+            <RowDefinition Height="Auto" />  <!-- 导航栏 -->
+            <RowDefinition Height="*" />     <!-- 卡片内容区 -->
+            <RowDefinition Height="Auto" />  <!-- 底部操作条 -->
         </Grid.RowDefinitions>
 
-        <!-- ═══════════════ 标题 ═══════════════ -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal">
-            <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource CardBrush}"
-                    VerticalAlignment="Center">
-                <TextBlock Text="👑" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="是否保留房间？" FontSize="17" FontWeight="Bold"
-                           Foreground="{DynamicResource TextBrush}" />
-                <TextBlock Text="你是房主，且房间内已没有其他玩家。" FontSize="12" Margin="0,4,0,0"
-                           Foreground="{DynamicResource MutedBrush}" />
+        <!-- ═══════════════ 导航栏 ═══════════════ -->
+        <Border x:Name="NavBar" Grid.Row="0" Style="{StaticResource NavBarPanel}">
+            <TextBlock x:Name="NavTitleText" Text="是否保留房间？" Style="{StaticResource NavTitleText}" />
+        </Border>
+
+        <!-- ═══════════════ 内容区 ═══════════════ -->
+        <ScrollViewer Grid.Row="1" Style="{StaticResource PageScroll}" Margin="12,12,12,0">
+            <StackPanel>
+                <Border Style="{StaticResource CardPanel}">
+                    <StackPanel>
+                        <TextBlock Text="你是房主，且房间内已没有其他玩家。" Style="{StaticResource MinorText}"
+                                   Margin="0,0,0,12" />
+                        <TextBlock Style="{StaticResource BodyText}"
+                                   Text="保留后房间会继续出现在房间列表中（他人凭房间号 / 邀请码即可加入），一直保留到服务器关闭；不保留则立即关闭该房间。" />
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardPanel}">
+                    <StackPanel>
+                        <TextBlock Text="保留房间" Style="{StaticResource BodyText}"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource OkBrush}" />
+                        <TextBlock Text="房间保持可用，你和好友之后都能重新进入。"
+                                   Style="{StaticResource MinorText}" Margin="0,4,0,0" />
+
+                        <Border Style="{StaticResource DividerLine}" Margin="0,12" />
+
+                        <TextBlock Text="关闭房间" Style="{StaticResource BodyText}"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource DangerTextBrush}" />
+                        <TextBlock Text="房间立即从列表中移除，房间号随之失效。"
+                                   Style="{StaticResource MinorText}" Margin="0,4,0,0" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
-        </StackPanel>
+        </ScrollViewer>
 
-        <!-- ═══════════════ 说明 ═══════════════ -->
-        <TextBlock Grid.Row="1" Margin="0,18,0,0" FontSize="12.5" TextWrapping="Wrap" LineHeight="21"
-                   Foreground="{DynamicResource TextSoftBrush}"
-                   Text="保留后房间会继续出现在房间列表中（他人凭房间号 / 邀请码即可加入），一直保留到服务器关闭；不保留则立即关闭该房间。" />
-
-        <!-- ═══════════════ 两种选择 ═══════════════ -->
-        <StackPanel Grid.Row="2" Margin="0,16,0,0">
-            <Border Background="{DynamicResource CardBrush}" CornerRadius="7" Padding="12,9">
-                <StackPanel>
-                    <TextBlock Text="✅ 保留房间" FontSize="12.5" FontWeight="SemiBold"
-                               Foreground="{DynamicResource OkBrush}" />
-                    <TextBlock Text="房间保持可用，你和好友之后都能重新进入。" FontSize="11.5"
-                               Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
-                </StackPanel>
-            </Border>
-            <Border Background="{DynamicResource CardBrush}" CornerRadius="7" Padding="12,9" Margin="0,8,0,0">
-                <StackPanel>
-                    <TextBlock Text="🚪 关闭房间" FontSize="12.5" FontWeight="SemiBold"
-                               Foreground="{DynamicResource DangerTextBrush}" />
-                    <TextBlock Text="房间立即从列表中移除，房间号随之失效。" FontSize="11.5"
-                               Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
-                </StackPanel>
-            </Border>
-        </StackPanel>
-
-        <!-- ═══════════════ 按钮 ═══════════════ -->
-        <StackPanel Grid.Row="3" Margin="0,16,0,0">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="关闭房间" Style="{StaticResource FlatButton}" Padding="18,8" Margin="0,0,10,0"
-                        Click="CloseRoom_OnClick" />
-                <Button Content="保留房间" Style="{StaticResource PrimaryButton}" Padding="18,8"
+        <!-- ═══════════════ 底部操作条 ═══════════════ -->
+        <Border Grid.Row="2" Style="{StaticResource FooterBar}">
+            <StackPanel>
+                <Button x:Name="PrimaryAction" Content="保留房间" Style="{StaticResource BlockPrimaryButton}"
                         Click="KeepRoom_OnClick" />
+                <Button Content="关闭房间" Style="{StaticResource BlockSecondaryButton}" Margin="0,8,0,0"
+                        Click="CloseRoom_OnClick" />
+                <TextBlock Text="直接关闭本窗口视为「保留房间」。"
+                           Style="{StaticResource FootnoteText}" Margin="0,12,0,0" />
             </StackPanel>
-            <TextBlock Text="直接关闭本窗口视为「保留房间」。" FontSize="11" Margin="0,10,0,0"
-                       HorizontalAlignment="Right" Foreground="{DynamicResource FaintBrush}" />
-        </StackPanel>
+        </Border>
     </Grid>
 </Window>

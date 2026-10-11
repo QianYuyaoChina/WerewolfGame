@@ -145,10 +145,69 @@ public sealed class LoginViewModel : ObservableObject
     public async Task LoginWithServerUrlAsync(string url)
     {
         ServerUrl = url;
-        await LoginAsync(persistUrl: false);
+        await LoginCoreAsync(url, UsernameInput, PasswordInput,
+            persistUrl: false, rememberUsername: true, raiseSucceeded: true);
     }
 
-    private async Task LoginAsync(bool persistUrl = true)
+    /// <summary>
+    /// 用**显式凭据**登录（v2.5.0 第 6 条 · 一键开服用）。
+    ///
+    /// 与普通登录的两点差别（架构 K13 / PRD 6.6 / E-20）：
+    /// <list type="number">
+    ///   <item>**不写** <see cref="UsernameInput"/> / <see cref="PasswordInput"/> ——
+    ///         用户手填的凭据一字不改（用的是参数里的凭据）；</item>
+    ///   <item>**不触发** <see cref="LoginSucceeded"/> —— 一键开服要停在「已就绪」态，
+    ///         由用户点「进入房间列表」再进（见 <see cref="EnterRoomList"/>）。</item>
+    /// </list>
+    /// </summary>
+    /// <returns>是否登录成功。</returns>
+    public async Task<bool> LoginWithCredentialsAsync(string url, string username, string password,
+                                                      bool persistUrl = false)
+        => await LoginCoreAsync(url, username, password,
+            persistUrl, rememberUsername: false, raiseSucceeded: false);
+
+    /// <summary>
+    /// 「局域网地址优先、失败回落本机一次」的连接流程（架构 D7）——
+    /// 抽到登录视图模型里，让「一键开服」与将来的其它入口共用同一份回落逻辑。
+    /// 回落成功后仍要写 <c>InviteUrlOverride</c>（v2.4.0 的 E-18 语义不能丢）。
+    /// </summary>
+    /// <returns>是否连接并登录成功。</returns>
+    public async Task<bool> ConnectWithFallbackAsync(string connectUrl, string localUrl, string lanUrl,
+                                                     string username, string password)
+    {
+        if (await LoginWithCredentialsAsync(connectUrl, username, password)) return true;
+
+        // 局域网地址与本机地址相同（没有网卡 / 本机就是局域网）时没有必要再试一次。
+        if (string.Equals(localUrl, connectUrl, StringComparison.Ordinal)) return false;
+
+        SetSharedStatus("局域网地址连不上，改用本机地址重试…");
+        if (!await LoginWithCredentialsAsync(localUrl, username, password)) return false;
+
+        // E-18：回落只改「我怎么连自己」，分享出去的邀请码仍必须是局域网地址 ——
+        // 否则好友拿到码会连到 127.0.0.1（连到他自己电脑上）。
+        Session.InviteUrlOverride = lanUrl;
+        SetSharedStatus("已改用本机地址连接（分享给好友的邀请码仍是局域网地址）。");
+        return true;
+    }
+
+    /// <summary>
+    /// 把「已就绪的会话」交给上层（一键开服就绪后点「进入房间列表」走的这一条）。
+    /// 未登录时什么都不做，避免把半成品会话放出去。
+    /// </summary>
+    public bool EnterRoomList()
+    {
+        if (!_client.IsLoggedIn) return false;
+
+        LoginSucceeded?.Invoke(_client);
+        return true;
+    }
+
+    /// <summary>
+    /// 登录的**唯一**实现：地址 + 显式凭据 + 三个开关（是否记住地址 / 用户名，是否立刻把会话交出去）。
+    /// 普通登录与一键开服的显式凭据登录都走这里，行为差别只由开关表达。
+    /// </summary>
+    private async Task<bool> LoginCoreAsync(string url, string username, string password,
+                                            bool persistUrl, bool rememberUsername, bool raiseSucceeded)
     {
         IsBusy = true;
 
@@ -158,13 +217,13 @@ public sealed class LoginViewModel : ObservableObject
         Status = switching ? "已断开当前服务器，正在连接新的服务器…" : "正在连接服务器…";
         try
         {
-            var result = await _client.ConnectAndLoginAsync(ServerUrl, UsernameInput, PasswordInput);
+            var result = await _client.ConnectAndLoginAsync(url, username, password);
             if (!result.Ok)
             {
                 // 失败原因可能来自本地校验、服务器拒绝或连接异常，统一显示。
                 ShowError = true;
                 Status = result.Message;
-                return;
+                return false;
             }
 
             // 使用了邀请码：登录成功后直接进入对应房间（房间密码由邀请码携带，无需再输）。
@@ -175,7 +234,7 @@ public sealed class LoginViewModel : ObservableObject
                 {
                     ShowError = true;
                     Status = "进入房间失败：" + rr.Message;
-                    return;   // 停在登录窗口，让用户修改邀请码或稍后重试
+                    return false;   // 停在登录窗口，让用户修改邀请码或稍后重试
                 }
                 _pendingInvite = null;
             }
@@ -184,23 +243,33 @@ public sealed class LoginViewModel : ObservableObject
             IsLoggedIn = true;
             Status = result.Message;
 
-            // 登录成功才记住地址与用户名。
-            if (persistUrl) UiStateStore.State.ServerUrl = ServerUrl;
-            UiStateStore.State.Username = UsernameInput;
-            UiStateStore.Save();
+            // 登录成功才记住地址与用户名（显式凭据登录不覆盖用户手填的用户名）。
+            if (persistUrl) UiStateStore.State.ServerUrl = url;
+            if (rememberUsername)
+            {
+                UiStateStore.State.Username = username;
+                UiStateStore.Save();
+            }
 
-            LoginSucceeded?.Invoke(_client);
+            if (raiseSucceeded) LoginSucceeded?.Invoke(_client);
+            return true;
         }
         catch (Exception ex)
         {
             ShowError = true;
             Status = "无法连接：" + ex.Message;
+            return false;
         }
         finally
         {
             IsBusy = false;
         }
     }
+
+    /// <summary>普通登录（Tab2 的按钮 / 回车）：成功即把会话交给上层。</summary>
+    private async Task LoginAsync(bool persistUrl = true)
+        => await LoginCoreAsync(ServerUrl, UsernameInput, PasswordInput,
+            persistUrl, rememberUsername: true, raiseSucceeded: true);
 
     /// <summary>窗口关闭且未登录成功时，释放可能残留的连接。</summary>
     public async Task DisposeSessionAsync()

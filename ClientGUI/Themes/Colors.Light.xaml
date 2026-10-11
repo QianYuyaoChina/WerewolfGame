@@ -6,6 +6,9 @@
 
         键名必须与 Colors.Dark.xaml 完全一致（ThemeManager 会把深色字典整体换成这一份）。
         调整原则：文字对比度 ≥ 4.5:1，浅底上用深文字，强调色稍微加深以免发飘。
+
+        v2.5.0 新增 17 个语义键 + 1 个兜底 Color，键名与 Colors.Dark.xaml 逐字一致
+        （详见 docs/v25/ARCHITECTURE.md §4.1）；Action* 沿用现有 Accent* 取值。
     -->
 
     <!-- 背景与容器 -->
@@ -44,4 +47,35 @@
     <SolidColorBrush x:Key="ErrorBrush" Color="#FFC62828" />
     <SolidColorBrush x:Key="PhaseBrush" Color="#FF6B4FD8" />
     <SolidColorBrush x:Key="WarnBrush" Color="#FF9A6A00" />
+
+    <!-- ═══════════════ v2.5.0 小程序骨架：语义键 ═══════════════ -->
+    <!-- 页面与容器（浅色 = 微信灰底 + 纯白导航栏 / 卡片） -->
+    <SolidColorBrush x:Key="PageBgBrush" Color="#FFF2F3F5" />
+    <SolidColorBrush x:Key="NavBarBgBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="NavBarTextBrush" Color="#FF1A1A1A" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#FFE5E7EB" />
+    <SolidColorBrush x:Key="CardAltBrush" Color="#FFF7F8FA" />
+
+    <!-- 主操作（取值沿用 Accent*：保留现有蓝主色，不引入微信绿） -->
+    <SolidColorBrush x:Key="ActionBrush" Color="#FF2F6BE0" />
+    <SolidColorBrush x:Key="ActionTextBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="ActionHoverBrush" Color="#FF4A82EA" />
+    <SolidColorBrush x:Key="ActionPressedBrush" Color="#FF2455B8" />
+    <SolidColorBrush x:Key="ActionDisabledBrush" Color="#FFC8CDD4" />
+
+    <!-- 称号（金）：浅色主题用深金，保证对比度 ≥ 4.5:1 -->
+    <SolidColorBrush x:Key="TitleTextBrush" Color="#FFB07D12" />
+    <SolidColorBrush x:Key="TitleBorderBrush" Color="#FFD9A83A" />
+    <SolidColorBrush x:Key="TitleBgBrush" Color="#1AC9971F" />
+
+    <!-- 浮层与表单 -->
+    <SolidColorBrush x:Key="MaskBrush" Color="#66000000" />
+    <SolidColorBrush x:Key="PlaceholderBrush" Color="#FFA8AFBA" />
+
+    <!-- 通用胶囊 -->
+    <SolidColorBrush x:Key="ChipTextBrush" Color="#FF5A6472" />
+    <SolidColorBrush x:Key="ChipBorderBrush" Color="#FFDDE1E7" />
+
+    <!-- 房主设置「游戏徽章」描边兜底色（待办 T4，键名与深色一致）。 -->
+    <Color x:Key="GameBadgeFallbackColor">#FF6E7A8C</Color>
 </ResourceDictionary>

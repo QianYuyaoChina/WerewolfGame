@@ -1,0 +1,58 @@
+<!--
+    彩蛋输入框的浮层内容（v2.5.0 第 3 + 4 条）。
+
+    它是 OverlayDialog 的**正文**（DialogBody），不是 Window 子类：
+    新增对话框一律走页面内浮层（架构 K11），不扩大 UI 冒烟的结构契约（架构 D3-C2）。
+
+    两种形态共用同一个输入框（DataContext = EggViewModel）：
+      · 口令态：只有「彩蛋口令」框；
+      · 称号编辑态（输入 surprise 后由服务端下发切换）：当前称号 + 新称号框 + 清除按钮。
+-->
+<UserControl x:Class="ClientGUI.Views.EggDialog"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:controls="clr-namespace:ClientGUI.Controls"
+             mc:Ignorable="d"
+             Background="Transparent"
+             Foreground="{DynamicResource TextBrush}"
+             FontFamily="Microsoft YaHei UI, Segoe UI"
+             UseLayoutRounding="True">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <!-- ═══════════════ 称号编辑态：先看当前称号 ═══════════════ -->
+        <StackPanel Visibility="{Binding IsTitleMode, Converter={StaticResource BoolToVisibility}}"
+                    Margin="0,0,0,12">
+            <TextBlock Text="当前称号" Style="{StaticResource FieldLabel}" />
+            <StackPanel Orientation="Horizontal">
+                <controls:TitleChip Text="{Binding CurrentTitle}" VerticalAlignment="Center" />
+                <TextBlock Text="（无）" Style="{StaticResource MinorText}" Margin="8,0,0,0"
+                           VerticalAlignment="Center"
+                           Visibility="{Binding HasTitle, Converter={StaticResource InverseBoolToVisibility}}" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- ═══════════════ 两种形态共用的输入框 ═══════════════ -->
+        <TextBlock Text="{Binding InputLabel}" Style="{StaticResource FieldLabel}" />
+        <TextBox Style="{StaticResource FieldInput}"
+                 Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" />
+
+        <!-- 称号编辑态的补充说明（就地提示，不弹框） -->
+        <TextBlock Text="最多 8 个汉字或 16 个字符；留空并保存，就是清除称号。"
+                   Style="{StaticResource FieldHint}"
+                   Visibility="{Binding IsTitleMode, Converter={StaticResource BoolToVisibility}}" />
+
+        <Button Content="清除称号" Style="{StaticResource BlockSecondaryButton}" Margin="0,12,0,0"
+                Command="{Binding ClearTitleCommand}"
+                Visibility="{Binding IsTitleMode, Converter={StaticResource BoolToVisibility}}" />
+    </StackPanel>
+</UserControl>

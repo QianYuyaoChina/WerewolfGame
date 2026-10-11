@@ -49,6 +49,11 @@ public static class ServerBootstrap
         // 账号文件显式传绝对路径：独立服务端 = CWD\accounts.json（与改造前同一个文件），
         // 内置服务器 = 工作目录\accounts.json。两边都不依赖进程 CWD 也能正确。
         builder.Services.AddSingleton(new AccountStore(Path.Combine(options.ContentRoot, "accounts.json")));
+
+        // 账号目录接口：房间管理器 / 房间只认这个门面（称号下发 + 管理员判定），
+        // 不认识 AccountStore 的存盘格式（v2.5.0 第 4 / 5 条）。
+        builder.Services.AddSingleton<IAccountDirectory>(sp => sp.GetRequiredService<AccountStore>());
+
         builder.Services.AddSingleton<CryptoSessionStore>();
         builder.Services.AddSingleton<EncryptedChannel>();
 
@@ -60,6 +65,12 @@ public static class ServerBootstrap
         var catalog = new GameCatalog();
         catalog.RegisterAll(GameDiscovery.Discover(typeof(ServerBootstrap).Assembly));
         builder.Services.AddSingleton<IGameCatalog>(catalog);
+
+        // 可编辑数据资源登记处（v2.5.0 第 5 条）：构造时遍历 IGameCatalog 的全部模块，
+        // 逐个问「你有哪些可编辑资源」。平台层只认识 IEditableDataResource 六个成员，
+        // 不认识任何游戏专属文件名 / 行格式（架构 K7：平台层零游戏后门）。
+        builder.Services.AddSingleton(sp => new EditableDataRegistry(
+            sp.GetRequiredService<IGameCatalog>(), options.ContentRoot));
 
         // 房间运行参数（宽限期 / 房间上限 / 扫描间隔）从 appsettings.json 的 Room 节点读取。
         var roomOptions = builder.Configuration.GetSection("Room").Get<RoomOptions>() ?? new RoomOptions();
@@ -80,6 +91,12 @@ public static class ServerBootstrap
         builder.WebHost.UseUrls(options.Url);
 
         var app = builder.Build();
+
+        // 内置管理员账号（v2.5.0 第 5 条）：不存在则按默认密码创建。
+        // 放在「组合根构建之后、启动之前」，独立服务端与内置服务器共用同一条路径；
+        // 管理员改过密码后不会被重置（EnsureAdmin 只做「缺失补建」）。
+        app.Services.GetRequiredService<AccountStore>().EnsureAdmin();
+
         app.UseCors();
         app.MapHub<GameHub>("/gamehub");
         app.MapGet("/", () => "🕹 Game platform server is running.");

@@ -21,6 +21,17 @@ public interface IGameCatalog
 
     /// <summary>缺失 / 未知 gameId 的兜底解析：null / 空白 → Default；未知 → 原样返回（由调用方决定拒绝）。</summary>
     string ResolveOrDefault(string? gameId);
+
+    /// <summary>
+    /// 注册表里的全部游戏模块（v2.5.0 第 5 条新增）。
+    ///
+    /// 为什么需要它：<c>EditableDataRegistry</c> 要在构造时向每个模块问一次
+    /// 「你有哪些可编辑资源」，而「实例工厂」那条链（<see cref="TryGetFactory"/>）
+    /// 只给得出创建实例的委托、拿不到模块本身。
+    ///
+    /// 带默认实现（返回空）：既有实现方 / 测试替身零改动。
+    /// </summary>
+    IReadOnlyList<IGameModule> Modules => Array.Empty<IGameModule>();
 }
 
 /// <summary><see cref="IGameCatalog"/> 的默认实现：注册单元为 <see cref="IGameModule"/>。</summary>
@@ -79,4 +90,8 @@ public sealed class GameCatalog : IGameCatalog
     /// <inheritdoc />
     public string ResolveOrDefault(string? gameId)
         => string.IsNullOrWhiteSpace(gameId) ? GameIds.Default : gameId.Trim();
+
+    /// <summary>注册表里的全部游戏模块（v2.5.0 第 5 条）：按 GameId 排序，结果稳定便于断言。</summary>
+    public IReadOnlyList<IGameModule> Modules
+        => _modules.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => kv.Value).ToList();
 }

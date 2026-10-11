@@ -1,0 +1,113 @@
+classDiagram
+    %% v2.5 增量架构 · 关键类型（详见 docs/v25/ARCHITECTURE.md §7）
+
+    class IGameModule {
+        +GameInfo Info
+        +CreateInstance(ctx) IGameInstance
+        +CreateEditableResources(dataRoot) IReadOnlyList~IEditableDataResource~
+    }
+    class IEditableDataResource {
+        +string ResourceId
+        +string DisplayName
+        +string FormatHint
+        +Load() string
+        +Validate(content) DataResourceCheck
+        +Save(content) DataResourceWrite
+    }
+    class UndercoverGameModule {
+        +CreateEditableResources(dataRoot) IReadOnlyList
+    }
+    class WerewolfGameModule {
+        +CreateEditableResources(dataRoot) 默认空实现
+    }
+    class UndercoverWordResource {
+        +Load() string
+        +Validate(content) DataResourceCheck
+        +Save(content) DataResourceWrite
+    }
+    class EditableDataRegistry {
+        +List() IReadOnlyList~DataResourceItemDto~
+        +TryGet(id, out resource) bool
+        +DigestOf(content) string
+    }
+    class AtomicFileWriter {
+        +TryWrite(path, content) (bool, string)
+    }
+    class AccountStore {
+        +AdminUsername = "admin"
+        +Register(u,p) string
+        +Verify(u,p) bool
+        +ChangePassword(u,old,new) string
+        +EnsureAdmin()
+        +IsAdmin(u) bool
+        +TitleOf(u) string
+        +SetTitle(u,t)
+    }
+    class GameHub {
+        +Handshake(helloJson) Task~string~
+        +Confirm(proof) Task~bool~
+        +Call(envelope) Task~string~
+        -DispatchAsync(req) RpcReply
+        -HandleSession()
+        -HandleSetTitle()
+        -HandleEgg()
+        -HandleChangePassword()
+        -HandleDataResources()
+        -HandleDataResourceGet()
+        -HandleDataResourceSave()
+    }
+    class RoomManager {
+        +List() List~RoomInfoDto~
+        +BindIdentity(connId, username)
+        +GetUsername(connId) string
+    }
+    class GameRoom {
+        +SnapshotFor(connId) GameStateDto
+        +ToInfo() RoomInfoDto
+    }
+    class GameClient {
+        +bool IsAdmin
+        +string Title
+        +GetSessionAsync() Task~SessionInfoDto~
+        +SetTitleAsync(title) Task
+        +EggAsync(code) Task~EggReplyPayload~
+        +ChangePasswordAsync(old,new) Task
+        +ListDataResourcesAsync() Task
+        +GetDataResourceAsync(id) Task
+        +SaveDataResourceAsync(id,content,digest) Task
+    }
+    class Ops {
+        +Session = "session"
+        +SetTitle = "settitle"
+        +Egg = "egg"
+        +ChangePassword = "changepassword"
+        +DataResources = "dataresources"
+        +DataResourceGet = "dataresourceget"
+        +DataResourceSave = "dataresourcesave"
+    }
+    class EggTapCounter {
+        +RegisterTap(nowMs) bool
+        +Reset()
+    }
+    class CloseIntent {
+        +RequiresFullShutdown(source) bool
+    }
+    class EmbeddedServerViewModel {
+        +OneClickStep Step
+        +OneClickCommand
+        +StepText
+        +IsOneClickDone
+    }
+
+    IGameModule <|.. UndercoverGameModule
+    IGameModule <|.. WerewolfGameModule
+    IEditableDataResource <|.. UndercoverWordResource
+    UndercoverGameModule ..> UndercoverWordResource : 创建
+    EditableDataRegistry --> IGameModule : 遍历收集
+    UndercoverWordResource ..> AtomicFileWriter : 原子写盘
+    GameHub --> EditableDataRegistry
+    GameHub --> AccountStore
+    RoomManager --> AccountStore : 填 HostTitle
+    GameRoom --> AccountStore : 填 PlayerDto.Title
+    GameClient --> Ops
+    GameClient ..> GameHub : Call(op, payload)

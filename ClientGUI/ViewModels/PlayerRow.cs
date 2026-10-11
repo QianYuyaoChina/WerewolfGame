@@ -22,6 +22,14 @@ public sealed class PlayerRow : ObservableObject
     /// <summary>标签颜色（十六进制，如 "#FFA07A"）；为空则用主题默认色。</summary>
     public string? TagColor { get; init; }
 
+    /// <summary>
+    /// 玩家的**称号**（v2.5.0 第 4 条，服务端权威）。空 = 无称号 → 称号胶囊不渲染。
+    /// </summary>
+    public string? Title { get; init; }
+
+    /// <summary>是否有可展示的称号（供界面决定要不要渲染胶囊）。</summary>
+    public bool HasTitle => !string.IsNullOrWhiteSpace(Title);
+
     /// <summary>当前阶段是否可以点选该玩家作为目标。</summary>
     public bool Selectable
     {

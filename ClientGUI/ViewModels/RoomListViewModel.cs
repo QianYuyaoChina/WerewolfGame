@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows.Threading;
+using ClientGUI.Services;
 using Werewolf.Client.Share;
 
 namespace ClientGUI.ViewModels;
@@ -28,6 +29,11 @@ public sealed class RoomRow
     public bool HasPassword { get; init; }
     public string Host { get; init; } = "";
 
+    /// <summary>
+    /// 房主的称号（服务端权威，随房间列表自然下发）。空 = 无称号 → 界面不渲染称号胶囊。
+    /// </summary>
+    public string HostTitle { get; init; } = "";
+
     public string CountText => $"{PlayerCount}/{MaxPlayers}";
     public string StatusText => RoomStatus.Name(Status);
     public string LockText => HasPassword ? "🔒" : "—";
@@ -55,6 +61,12 @@ public sealed class RoomListViewModel : ObservableObject
     private readonly SynchronizationContext? _ui;
     private readonly DispatcherTimer _timer = new() { Interval = PollInterval };
 
+    /// <summary>
+    /// 彩蛋计数器（3 秒 5 击）。放在视图模型里而不是窗口代码里：判定是纯逻辑，
+    /// 窗口只负责把「按下了」这件事转进来（架构 §8.1）。
+    /// </summary>
+    private readonly EggTapCounter _eggTap = new();
+
     private RoomRow? _selectedRoom;
     private string _password = "";
     private string _inviteCode = "";
@@ -73,6 +85,9 @@ public sealed class RoomListViewModel : ObservableObject
         RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync());
         JoinCommand = new AsyncRelayCommand(_ => JoinSelectedAsync(), _ => SelectedRoom != null && !IsBusy);
         UseInviteCommand = new AsyncRelayCommand(_ => UseInviteAsync(), _ => !IsBusy);
+
+        // 内置服务器启停时同步导航栏的运行胶囊（关主窗口不停服务器，PRD 8.6）。
+        EmbeddedServerService.Current.Changed += () => Post(NotifyServerStatusChanged);
     }
 
     // ==================== 集合与命令 ====================
@@ -138,6 +153,45 @@ public sealed class RoomListViewModel : ObservableObject
     /// <summary>房间列表为空（用于显示空态提示）。</summary>
     public bool IsEmpty => RoomCount == 0;
 
+    // ==================== 内置服务器运行状态（PRD 8.6） ====================
+
+    /// <summary>本进程拉起的内置服务器是否正在运行。</summary>
+    public bool IsEmbeddedServerRunning => EmbeddedServerService.Current.IsRunning;
+
+    /// <summary>运行胶囊的文案（未运行时为空，胶囊整体收起）。</summary>
+    public string EmbeddedServerText => IsEmbeddedServerRunning ? "内置服务器运行中" : "";
+
+    private void NotifyServerStatusChanged()
+    {
+        OnPropertyChanged(nameof(IsEmbeddedServerRunning));
+        OnPropertyChanged(nameof(EmbeddedServerText));
+    }
+
+    /// <summary>把回调切回 UI 线程（服务的通知可能来自后台线程）。</summary>
+    private void Post(Action action)
+    {
+        if (_ui == null) { action(); return; }
+        _ui.Post(_ => action(), null);
+    }
+
+    // ==================== 彩蛋（第 3 条） ====================
+
+    /// <summary>
+    /// 记一次「点中导航标题」。返回 true = 命中「3 秒 5 击」，调用方据此弹出输入框。
+    /// 未达成（次数不足 / 超时）一律返回 false 且**静默清零**，不给任何可见反馈。
+    /// </summary>
+    public bool RegisterTitleTap() => _eggTap.RegisterTap(Environment.TickCount64);
+
+    /// <summary>复位彩蛋计数（关掉输入框后调用，下次重新点 5 下才会再弹）。</summary>
+    public void ResetTitleTaps() => _eggTap.Reset();
+
+    /// <summary>在状态行显示一句普通提示（不标红），如「称号已保存」。</summary>
+    public void ShowNotice(string message)
+    {
+        ShowError = false;
+        Status = message;
+    }
+
     // ==================== 轮询 ====================
 
     public void StartPolling() => _timer.Start();
@@ -176,7 +230,8 @@ public sealed class RoomListViewModel : ObservableObject
                     MaxPlayers = dto.MaxPlayers,
                     Status = dto.Status,
                     HasPassword = dto.HasPassword,
-                    Host = dto.Host
+                    Host = dto.Host,
+                    HostTitle = dto.HostTitle
                 });
             }
 

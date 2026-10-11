@@ -1,0 +1,58 @@
+sequenceDiagram
+    %% v2.5 四条关键时序（详见 docs/v25/ARCHITECTURE.md §8）
+    actor U as 玩家/管理员
+    participant GUI as GUI（导航/浮层/VM）
+    participant GC as GameClient
+    participant S as 服务端 GameHub
+    participant AS as AccountStore / 资源层
+    participant F as 服务器数据文件
+
+    rect rgb(240,246,255)
+    Note over U,F: ① 彩蛋触发 → 称号编辑
+    U->>GUI: 导航标题 3 秒 5 击
+    GUI->>GC: EggAsync("surprise")
+    GC->>S: Call(op=egg)
+    S-->>GC: 命中 → {Kind:"title", Title}
+    U->>GUI: 改名 → 保存
+    GUI->>GC: SetTitleAsync(title)
+    GC->>S: Call(op=settitle)
+    S->>AS: 校验 + 按连接身份写入
+    S-->>GC: ok「称号已保存」+ 广播新状态
+    end
+
+    rect rgb(240,255,246)
+    Note over U,F: ② 一键开服
+    U->>GUI: 点「一键开服」
+    GUI->>GUI: ① 启动（端口漂移）
+    GUI->>GUI: ② 连接（局域网优先→本机回落一次）
+    GUI->>GC: ③ LoginWithCredentials(admin)
+    GC->>S: Call(op=join)
+    S-->>GC: JoinAck { IsAdmin:true, Title }
+    GUI-->>U: 「已登录：admin（管理员）」
+    end
+
+    rect rgb(255,250,240)
+    Note over U,F: ③ 管理员编辑词库
+    U->>GUI: 账号菜单 → 服务器设置
+    GUI->>GC: ListDataResourcesAsync()
+    GC->>S: Call(op=dataresources)（非管理员 → 「仅管理员可操作」）
+    GUI->>GC: GetDataResourceAsync(id)
+    GC->>S: Call(op=dataresourceget) → 全文 + Digest
+    U->>GUI: 追加行 → 保存
+    GUI->>GC: SaveDataResourceAsync(id, content, digest)
+    GC->>S: Call(op=dataresourcesave)
+    S->>AS: Validate（第几行错误 / 行数上限）
+    AS->>F: AtomicFileWriter（tmp → 原子替换）
+    S-->>GC: ok「已保存 N 条，下一局生效」
+    end
+
+    rect rgb(252,244,255)
+    Note over U,F: ④ 修改密码
+    U->>GUI: 账号菜单 → 修改密码…
+    U->>GUI: 旧 / 新 / 确认（两遍不一致 → 禁止提交）
+    GUI->>GC: ChangePasswordAsync(old, new)
+    GC->>S: Call(op=changepassword)
+    S->>AS: 旧密码校验 + 长度 + 不得与旧密码相同
+    AS-->>S: 重算摘要保存（admin 仍为管理员）
+    S-->>GC: ok「密码已修改，下次登录请用新密码」
+    end

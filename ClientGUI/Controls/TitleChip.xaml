@@ -1,0 +1,39 @@
+<!--
+    称号胶囊（v2.5.0 第 4 条）：金色文字 + 比相邻正文小一档的字号 + 同色系 1px 圆角框。
+
+    样式来源：AppShell.xaml 的 TitleChipBorder / TitleChipText（色键 TitleTextBrush /
+    TitleBorderBrush / TitleBgBrush，深浅两套各一套值）—— 本控件**不自带任何颜色**，
+    也不内联样式，换主题时自动跟着变。
+
+    为什么单独做成控件而不是在行模板里写 Border+TextBlock：
+    房间列表「房主」列与房间内玩家行都要用它，抽出来才能共用「无称号不渲染」这一条规则
+    （PRD 4.4：不留空胶囊）。
+
+    为什么不是 Window 子类：全程不新增 Window，避免扩大 UI 冒烟的结构契约（架构 D3-C2）。
+-->
+<UserControl x:Class="ClientGUI.Controls.TitleChip"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             x:Name="Root"
+             Background="Transparent"
+             Foreground="{DynamicResource TitleTextBrush}"
+             FontFamily="Microsoft YaHei UI, Segoe UI"
+             UseLayoutRounding="True">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- 文本为空时整个控件 Collapsed（由代码隐藏维护），不留空胶囊。 -->
+    <Border x:Name="ChipBorder" Style="{StaticResource TitleChipBorder}">
+        <TextBlock x:Name="ChipText" Style="{StaticResource TitleChipText}"
+                   Text="{Binding Text, ElementName=Root}" />
+    </Border>
+</UserControl>

@@ -7,8 +7,9 @@ namespace ClientGUI.Controls;
 /// 页面内浮层宿主（遮罩 + 居中卡片 + 通栏主 / 次按钮 + 就地提示）。
 ///
 /// 它替代 <see cref="MessageBox"/> 承载业务流程：彩蛋输入、服务器设置、修改密码等
-/// 新增对话框一律用本浮层（架构约定 K11），既有 <c>KeepRoomWindow</c> /
-/// <c>InviteCodeWindow</c> 仍然保留 Window 子类（结构契约 S1，不改动）。
+/// 新增对话框一律用本浮层（架构约定 K11）。
+/// v2.6.0 S4 起，连「保留房间 / 邀请码 / 关于 / 更新日志」这些原来是独立 Window 的流程
+/// 也已经是**页面**（`Views/Pages/*`），全仓只剩 <c>ShellWindow</c> 一个 Window 子类。
 ///
 /// 用法见 <c>OverlayDialog.xaml</c> 顶部注释：塞正文用 <see cref="DialogBody"/>，
 /// 按钮文案用 <see cref="PrimaryButtonText"/> / <see cref="SecondaryButtonText"/>，

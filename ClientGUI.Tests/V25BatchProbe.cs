@@ -1,8 +1,10 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using ClientGUI.Services;
 using ClientGUI.ViewModels;
 using ClientGUI.Views;
+using ClientGUI.Views.Pages;
 using Werewolf.Client.Share;
 using Werewolf.Server;
 using Werewolf.Server.Games;
@@ -18,8 +20,12 @@ namespace ClientGUI.Tests;
 ///   <item><b>默认组</b>（<see cref="RunLogicChecks"/>）：管理员账号生命周期（seed / 登录 / 注册被拒 /
 ///         改密码 / 重启不重置）、可编辑资源抽象的通用性、词库资源的原子落盘 —— 纯逻辑，不绑端口；</item>
 ///   <item><b>--ui</b>（<see cref="RunUiChecks"/>）：一键开服状态机、修改密码浮层正文的本地校验、
-///         8 个窗口导航标题的几何居中（≤1px）—— 要真实布局测量。</item>
+///         页面导航标题的几何居中（≤1px）—— 要真实布局测量。</item>
 /// </list>
+///
+/// ⚠ S4 迁移：本批原先量的是 8 个 <c>Window</c>；S4 把那 10 个窗口类删干净后，
+/// 载体换成 <see cref="PageCatalog.All"/> 里的**10 个页面**（原来 8 条 → 现在 10 条，只增不减）。
+/// 判据（≤1px 像素级居中）一个字没改。
 /// </summary>
 public static class V25BatchProbe
 {
@@ -218,7 +224,7 @@ public static class V25BatchProbe
     //  --ui 组：真实布局测量
     // ==================================================================
 
-    /// <summary>--ui：一键开服状态机 · 修改密码浮层 · 8 个窗口导航居中（必须 STA + 已初始化主题）。</summary>
+    /// <summary>--ui：一键开服状态机 · 修改密码浮层 · 10 个页面导航居中（必须 STA + 已初始化主题）。</summary>
     public static void RunUiChecks()
     {
         Console.WriteLine("   —— v2.5.0 B4 / B5：一键开服 / 改密码 / 导航居中（真实布局） ——");
@@ -231,10 +237,11 @@ public static class V25BatchProbe
     /// <summary>一键开服状态机的初始态与页面结构（不真起服，只验纯状态）。</summary>
     private static void CheckOneClickStateMachine()
     {
-        var window = new LoginWindow();
+        // S4：载体由 <c>LoginWindow</c> 换成 <c>LoginPage</c>（`Embedded` 视图模型属性同名保留）。
+        var page = new LoginPage(new AppSession());
         try
         {
-            var vm = window.Embedded;
+            var vm = page.Embedded;
 
             Check.Equal(OneClickStep.Idle, vm.Step, "B4：一键开服初始状态为 Idle");
             Check.False(vm.HasStepText, "B4：未点过时没有分步文案（界面保持干净）");
@@ -249,11 +256,11 @@ public static class V25BatchProbe
                 "B4：StartOnlyCommand / LoginToEmbeddedCommand 仍保留（C5）");
 
             // 页面结构：内置页只剩一个主按钮，且不再要求用户输入用户名 / 密码。
-            Check.True(window.FindName("EmbeddedPrimaryAction") is Button,
+            Check.True(page.FindName("EmbeddedPrimaryAction") is Button,
                 "B4：内置页有唯一主按钮 EmbeddedPrimaryAction");
-            Check.True(window.FindName("EmbeddedUsernameInput") == null,
+            Check.True(page.FindName("EmbeddedUsernameInput") == null,
                 "B4：内置页不再要求输入用户名（用内置管理员，一键开服）");
-            Check.True(window.FindName("EmbeddedPasswordInput") == null,
+            Check.True(page.FindName("EmbeddedPasswordInput") == null,
                 "B4：内置页不再要求输入密码");
         }
         catch (Exception ex)
@@ -263,7 +270,7 @@ public static class V25BatchProbe
         }
         finally
         {
-            try { window.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
+            try { page.OnLeave(); } catch { /* 未进过页面时离开可忽略 */ }
         }
     }
 
@@ -349,62 +356,42 @@ public static class V25BatchProbe
     }
 
     /// <summary>
-    /// T18：8 个窗口的导航标题中心与导航栏中心的偏移 ≤1px（像素级居中）。
+    /// T18：**10 个页面**的导航标题中心与导航栏中心的偏移 ≤1px（像素级居中）。
     /// 用真实布局测量；比 AppShellQaGuard 的「≤5%」更严（本批次把 Q-B1-01 修掉了）。
+    ///
+    /// ⚠ S4 迁移：原来量 8 个窗口（登录 / 列表 / 主窗口 / 创建房间 / 房主设置 / 设置 / 邀请码 / 保留房间），
+    /// 现在直接吃 <see cref="PageCatalog.All"/> —— **10 条**（多了关于 / 更新日志两页），判据仍是 ≤1px。
     /// </summary>
     private static void CheckNavCentering()
     {
-        var factories = new (string Name, Func<Window> Create)[]
-        {
-            ("登录窗口", () => new LoginWindow()),
-            ("房间列表窗口", () => new RoomListWindow(new GameClient())),
-            ("房间内主窗口", () => new MainWindow(new GameClient())),
-            ("创建房间窗口", () => new CreateRoomWindow()),
-            ("房主设置窗口", () => new HostSettingsWindow(new GameClient())),
-            ("设置窗口", () => new SettingsWindow()),
-            ("邀请码窗口", () => new InviteCodeWindow("WW1:NAV-PROBE")),
-            ("保留房间窗口", () => new KeepRoomWindow())
-        };
+        var session = new AppSession();
 
-        foreach (var (name, create) in factories)
+        foreach (var probe in PageCatalog.All)
         {
-            Window? window = null;
             try
             {
-                window = create();
-                var root = window.Content as FrameworkElement;
-                if (root == null) { Check.True(false, $"T18：{name} 内容根是 FrameworkElement"); continue; }
+                var page = probe.Create(session);
+                page.Measure(new Size(probe.DesignWidth, probe.DesignHeight));
+                page.Arrange(new Rect(0, 0, probe.DesignWidth, probe.DesignHeight));
+                page.UpdateLayout();
 
-                var size = new Size(double.IsNaN(window.Width) ? 1024 : window.Width,
-                                    double.IsNaN(window.Height) ? 768 : window.Height);
-                root.Measure(size);
-                root.Arrange(new Rect(0, 0, size.Width, size.Height));
-                root.UpdateLayout();
-
-                var bar = window.FindName("NavBar") as FrameworkElement;
-                FrameworkElement? title = window.FindName("NavTitleText") as FrameworkElement
-                                          ?? window.FindName("NavTitleButton") as FrameworkElement;
+                var bar = page.FindName("NavBar") as FrameworkElement;
+                FrameworkElement? title = page.FindName("NavTitleText") as FrameworkElement
+                                          ?? page.FindName("NavTitleButton") as FrameworkElement;
                 if (bar == null || title == null)
                 {
-                    Check.True(false, $"T18：{name} 有导航栏与导航标题");
+                    Check.True(false, $"T18：{probe.Name} 有导航栏与导航标题");
                     continue;
                 }
 
-                var titleLeft = title.TranslatePoint(new Point(0, 0), root).X;
-                var barLeft = bar.TranslatePoint(new Point(0, 0), root).X;
-                var offset = Math.Abs((titleLeft + title.ActualWidth / 2) - (barLeft + bar.ActualWidth / 2));
-
-                Console.WriteLine($"   · T18 {name}：标题偏移 {offset:F2}px（导航栏宽 {bar.ActualWidth:F0}）");
-                Check.True(offset <= 1.0, $"T18：{name} 导航标题几何居中（偏移 {offset:F2}px ≤ 1px）");
+                // v2.6.0 S5 / T42：判据统一 —— 居中判定只写在
+                // `PageCatalog.VerifyTitleCentered` 一处（≤1px），本批不再自己算一套。
+                PageCatalog.VerifyTitleCentered(page, bar, title, probe.Name);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"   · T18 居中测量（{name}）异常：{ex.Message}");
-                Check.True(false, $"T18：{name} 导航居中可测量且无异常");
-            }
-            finally
-            {
-                try { window?.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
+                Console.WriteLine($"   · T18 居中测量（{probe.Name}）异常：{ex.Message}");
+                Check.True(false, $"T18：{probe.Name} 导航居中可测量且无异常");
             }
         }
     }

@@ -25,6 +25,20 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
     /// <summary>UI 线程上下文：服务器回调来自后台线程，状态更新必须回到这里。</summary>
     private readonly SynchronizationContext? _ui;
 
+    // ---------- 订阅句柄（页面化后必须能退订，架构 §6.2） ----------
+    // 页面化之前整个对象随窗口一起被回收，泄漏被进程生命周期掩盖；
+    // 现在房间页会反复进出，同一个客户端的订阅若按次数累加，会导致
+    // 「同一条聊天消息处理 N 次、心跳 N 个」。因此所有订阅一律存字段，Detach() 逐个 -=。
+
+    private readonly Action<string> _onMessageReceived;
+    private readonly Action<GameStateDto> _onStateReceived;
+    private readonly Action<string> _onStatusChanged;
+    private readonly Action<Exception?> _onConnectionClosed;
+    private readonly Action<string> _onReconnected;
+    private readonly Action _onServerStatusChanged;
+    private readonly EventHandler _onHeartbeatTick;
+    private readonly System.Collections.Specialized.NotifyCollectionChangedEventHandler _onLogChanged;
+
     // ---------- 服务器状态 ----------
     private GameStateDto? _state;
     private IGameViewModel? _game;
@@ -57,25 +71,33 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
         _client = client;
         _ui = SynchronizationContext.Current;
 
-        DisconnectCommand = new AsyncRelayCommand(_ => LeaveRoomAsync());
         SendChatCommand = new RelayCommand(_ => SendChat());
         ClearLogCommand = new RelayCommand(_ => ClearLog());
         StartGameCommand = new AsyncRelayCommand(_ => StartGameAsync());
 
         // 心跳：每 20 秒测一次往返时延；失败即视为连接异常（后续由 SignalR 重连接管）。
-        _heartbeat.Tick += (_, _) => _ = PingOnceAsync();
+        _onHeartbeatTick = (_, _) => _ = PingOnceAsync();
+        _heartbeat.Tick += _onHeartbeatTick;
 
         // 消息条数变化时刷新「清空消息」菜单项的可用状态。
-        _log.Entries.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLog));
+        _onLogChanged = (_, _) => OnPropertyChanged(nameof(HasLog));
+        _log.Entries.CollectionChanged += _onLogChanged;
 
-        _client.MessageReceived += message => OnUi(() => OnMessageReceived(message));
-        _client.StateReceived += state => OnUi(() => OnStateReceived(state));
-        _client.StatusChanged += status => OnUi(() => OnStatusChanged(status));
-        _client.ConnectionClosed += ex => OnUi(() => OnConnectionClosed(ex));
-        _client.Reconnected += info => OnUi(() => OnReconnected(info));
+        _onMessageReceived = message => OnUi(() => OnMessageReceived(message));
+        _onStateReceived = state => OnUi(() => OnStateReceived(state));
+        _onStatusChanged = status => OnUi(() => OnStatusChanged(status));
+        _onConnectionClosed = ex => OnUi(() => OnConnectionClosed(ex));
+        _onReconnected = info => OnUi(() => OnReconnected(info));
+
+        _client.MessageReceived += _onMessageReceived;
+        _client.StateReceived += _onStateReceived;
+        _client.StatusChanged += _onStatusChanged;
+        _client.ConnectionClosed += _onConnectionClosed;
+        _client.Reconnected += _onReconnected;
 
         // 内置服务器启停时同步「服务器运行中」胶囊（关主窗口不停服务器，界面要能看出来，PRD 8.6）。
-        EmbeddedServerService.Current.Changed += () => OnUi(NotifyServerStatusChanged);
+        _onServerStatusChanged = () => OnUi(NotifyServerStatusChanged);
+        EmbeddedServerService.Current.Changed += _onServerStatusChanged;
 
         // 进入主窗口时已经登录并成功加入房间（登录/房间列表负责连接与加入）。
         IsConnected = _client.IsConnected;
@@ -119,7 +141,10 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
 
     // ==================== 命令与事件 ====================
 
-    public AsyncRelayCommand DisconnectCommand { get; }
+    // v2.6.0 S4（T48 / Q-S3-01）：原来的「退出房间」命令已删除。
+    // 它绑的是「无参的同步询问路径」（没人应答时按不保留处理），
+    // 页面化之后那条路的询问没人应答（会静默按「关闭房间」走），
+    // 因此它连同 MainWindow 一起下线；页面只用 LeaveRoomForPageAsync(bool) / LeaveRoomAsync(bool)。
     public RelayCommand SendChatCommand { get; }
     public AsyncRelayCommand StartGameCommand { get; }
 
@@ -404,18 +429,12 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
     /// </summary>
     public bool NeedsKeepRoomDecision => IsJoined && IsHost && !Players.Any(p => !p.IsYou);
 
-    /// <summary>
-    /// 房主退出房间时是否需要「是否保留房间」的询问，以及询问结果。
-    /// 仅在「本人是房主 + 已进房 + 房间内没有其他玩家」时询问；未注入询问（非 GUI 宿主）按「不保留」处理。
-    /// </summary>
-    public bool ResolveKeepRoom()
-        => NeedsKeepRoomDecision && (ConfirmKeepRoom?.Invoke() ?? false);
-
-    /// <summary>
-    /// 房主退出且房间内没有其他人时，由视图注入「是否保留房间」的询问（true = 保留）。
-    /// 未注入（例如非 GUI 宿主）时按「不保留」处理。
-    /// </summary>
-    public Func<bool>? ConfirmKeepRoom { get; set; }
+    // v2.6.0 S4（T47 / Q-S3-02）：视图模型上的**同步询问入口**（`Func<bool>` 注入 + 无参判定方法）
+    // 已整体删除，全仓零处残留（判据见 AppShellGuard 的 T48 守卫与 ActionComputationTests）。
+    // 那套入口的口径是「没人问 ⇒ 不保留」（`?.Invoke() ?? false`），
+    // 与 I6 的「没选 ⇒ 保留」**反向**；页面化之后询问由 KeepRoomPage 浮层回答，
+    // 三态翻译只剩 KeepRoomDecision.Resolve 一处。上面那个 NeedsKeepRoomDecision
+    // 保留下来 —— 它只回答"要不要问"，不做"问出什么"的判定。
 
     // ==================== 玩家选择 ====================
 
@@ -444,21 +463,25 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
 
     /// <summary>
     /// 程序收尾时复用「退出房间」的**同一条**路径（PRD E-10 / Q4-b）：
-    /// 与菜单项唯一的差别是不弹「是否保留房间」——关窗时弹窗会阻塞退出，
-    /// 按默认策略「不保留」处理。菜单里点「退出房间」仍然照旧弹。
+    /// 与菜单项唯一的差别是**不问**「是否保留房间」——收尾时弹浮层会阻塞退出，
+    /// 因此直接按「不保留」处理（v2.6.0 S4：不再靠注入一个同步询问委托来抑制询问，
+    /// 而是把 <c>false</c> 直接交给唯一实现）。
     /// </summary>
-    public Task LeaveRoomForShutdownAsync()
-    {
-        ConfirmKeepRoom = () => false;   // 抑制弹窗；LeaveRoomAsync 开头同步读取它
-        return LeaveRoomAsync();
-    }
+    public Task LeaveRoomForShutdownAsync() => LeaveRoomCoreAsync(keepRoom: false);
 
-    private async Task LeaveRoomAsync()
+    /// <summary>
+    /// 退出房间，**保留与否由调用方给定**（v2.6.0 S3：页面用 <c>KeepRoomPage</c> 浮层问完之后走这条）。
+    ///
+    /// 页面里的询问是「入栈一个浮层 + 等结果」的异步过程，视图模型不感知界面形态：
+    /// 页面先 <c>await</c> 出结论，再把结论交给这里。三态翻译仍然只有一个来源
+    /// ——<see cref="KeepRoomDecision.Resolve"/>（<c>null</c> ⇒ 保留）。
+    /// </summary>
+    public Task LeaveRoomAsync(bool keepRoom) => LeaveRoomCoreAsync(keepRoom);
+
+    /// <summary>退房的唯一实现：只离开房间，不拆连接（连接由房间列表页继续复用）。</summary>
+    private async Task LeaveRoomCoreAsync(bool keepRoom)
     {
         _heartbeat.Stop();
-
-        // 房主退出且房间内没有其他人时，询问是否保留房间（仅 GUI 提供该交互）。
-        var keepRoom = ResolveKeepRoom();
 
         // 只离开房间，不拆连接（连接由房间列表窗口继续复用）。
         try
@@ -760,6 +783,70 @@ public sealed class GameViewModel : ObservableObject, IGameHostBridge
         {
             LogStatus = "刷新房间状态失败：" + ex.Message;
         }
+    }
+
+    /// <summary>
+    /// 是否已退订（<see cref="Detach"/> 幂等：第二次调用直接返回）。
+    /// 页面化之后「退订做没做」必须可观测，否则订阅泄漏只能靠肉眼数日志。
+    /// </summary>
+    public bool IsDetached { get; private set; }
+
+    /// <summary>
+    /// 退订**全部**外部事件并停掉心跳（页面退场时调用，架构 §6.2 的硬性要求）。
+    ///
+    /// 退的是 5 个 <see cref="GameClient"/> 事件 + 1 个静态
+    /// <see cref="EmbeddedServerService.Changed"/> + 心跳 + 消息集合变化。
+    /// 静态事件尤其要退：它比页面活得久，忘了退就按「进房次数」累积。
+    ///
+    /// 幂等：页面被连着关两次、或 <c>OnLeave</c> 与析构路径都调了一次，都不会出错。
+    /// </summary>
+    public void Detach()
+    {
+        if (IsDetached) return;
+        IsDetached = true;
+
+        _heartbeat.Stop();
+        _heartbeat.Tick -= _onHeartbeatTick;
+
+        _log.Entries.CollectionChanged -= _onLogChanged;
+
+        _client.MessageReceived -= _onMessageReceived;
+        _client.StateReceived -= _onStateReceived;
+        _client.StatusChanged -= _onStatusChanged;
+        _client.ConnectionClosed -= _onConnectionClosed;
+        _client.Reconnected -= _onReconnected;
+
+        EmbeddedServerService.Current.Changed -= _onServerStatusChanged;
+    }
+
+    /// <summary>
+    /// 供**页面返回**使用，且「保留与否」已由页面问过（S3 起是 <c>KeepRoomPage</c> 浮层）。
+    /// <returns>true = 确实已离开房间（允许页面出栈）；false = 退出失败（进房状态未变，页面应留下）。</returns>
+    ///
+    /// 与 <see cref="LeaveRoomForShutdownAsync"/> 的差别只有「要不要结果」这一件事：
+    /// 收尾时没人关心返回值，而返回导航必须知道成功与否（架构 N3）。
+    /// v2.6.0 S4：无参重载（内部退回到同步询问的那一条）随同步询问入口一起删除，
+    /// 现在只有这一个入口，保留与否**必须由调用方给定**。
+    /// </summary>
+    public Task<bool> LeaveRoomForPageAsync(bool keepRoom) => LeaveRoomForPageCoreAsync(keepRoom);
+
+    /// <summary>退房并告诉调用方「是否真的离开了」（<c>RoomLeft</c> 事件是本页唯一的成功信号）。</summary>
+    private async Task<bool> LeaveRoomForPageCoreAsync(bool keepRoom)
+    {
+        var left = false;
+        void OnLeft() => left = true;
+
+        RoomLeft += OnLeft;
+        try
+        {
+            await LeaveRoomCoreAsync(keepRoom).ConfigureAwait(true);
+        }
+        finally
+        {
+            RoomLeft -= OnLeft;
+        }
+
+        return left;
     }
 
     /// <summary>窗口关闭时尽力断开连接。</summary>

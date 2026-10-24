@@ -67,6 +67,13 @@ public sealed class RoomListViewModel : ObservableObject
     /// </summary>
     private readonly EggTapCounter _eggTap = new();
 
+    // ---------- 订阅句柄（页面化后必须能退订，架构 §6.2） ----------
+    // 静态事件 EmbeddedServerService.Changed 原来接的是匿名 lambda，**无法 -=**；
+    // 页面化之后房间列表页会被反复进出（列表 ↔ 房间），不退订就按次数累积 → 提成字段。
+
+    private readonly EventHandler _onTimerTick;
+    private readonly Action _onServerChanged;
+
     private RoomRow? _selectedRoom;
     private string _password = "";
     private string _inviteCode = "";
@@ -80,14 +87,16 @@ public sealed class RoomListViewModel : ObservableObject
         _client = client;
         _ui = SynchronizationContext.Current;
 
-        _timer.Tick += (_, _) => _ = RefreshAsync();
+        _onTimerTick = (_, _) => _ = RefreshAsync();
+        _timer.Tick += _onTimerTick;
 
         RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync());
         JoinCommand = new AsyncRelayCommand(_ => JoinSelectedAsync(), _ => SelectedRoom != null && !IsBusy);
         UseInviteCommand = new AsyncRelayCommand(_ => UseInviteAsync(), _ => !IsBusy);
 
         // 内置服务器启停时同步导航栏的运行胶囊（关主窗口不停服务器，PRD 8.6）。
-        EmbeddedServerService.Current.Changed += () => Post(NotifyServerStatusChanged);
+        _onServerChanged = () => Post(NotifyServerStatusChanged);
+        EmbeddedServerService.Current.Changed += _onServerChanged;
     }
 
     // ==================== 集合与命令 ====================
@@ -197,6 +206,27 @@ public sealed class RoomListViewModel : ObservableObject
     public void StartPolling() => _timer.Start();
 
     public void StopPolling() => _timer.Stop();
+
+    /// <summary>轮询是否在跑（页面退场后必须为 false，架构 P9 的可断言点）。</summary>
+    public bool IsPolling => _timer.IsEnabled;
+
+    /// <summary>是否已退订（<see cref="Detach"/> 幂等：第二次调用直接返回）。</summary>
+    public bool IsDetached { get; private set; }
+
+    /// <summary>
+    /// 停轮询 + 退订**全部**外部事件（页面退场时调用，架构 §6.2）。
+    /// 重点是那条静态事件 <see cref="EmbeddedServerService.Changed"/>：
+    /// 它比页面活得久，忘了退就按「进列表页次数」累积。
+    /// </summary>
+    public void Detach()
+    {
+        if (IsDetached) return;
+        IsDetached = true;
+
+        StopPolling();
+        _timer.Tick -= _onTimerTick;
+        EmbeddedServerService.Current.Changed -= _onServerChanged;
+    }
 
     // ==================== 操作 ====================
 

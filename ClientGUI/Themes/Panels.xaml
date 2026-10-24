@@ -5,7 +5,7 @@
 
     <!--
         本字典在解析期需要 FlatButton / 转换器，因此必须显式合并 Converters 与 Controls，
-        不能依赖 MainWindow 的兄弟字典。
+        不能依赖任何窗口的兄弟字典（v2.6.0 S4 起全仓只有 ShellWindow 一个窗口）。
         颜色不在合并列表里：它由 ThemeManager 挂到 Application 级，本字典只通过
         {DynamicResource XxxBrush} 引用，才能做到运行期换主题。
     -->

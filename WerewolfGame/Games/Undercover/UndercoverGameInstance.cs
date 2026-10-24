@@ -264,18 +264,23 @@ public sealed class UndercoverGameInstance : IGameInstance
     }
 
     /// <summary>
-    /// 读取词库：优先用工作目录里的文件；缺失时用**程序内置默认词库**生成一份并打印警告。
+    /// 读取词库：优先用工作目录里的文件；缺失时用**程序内置默认词库**生成一份。
     /// 工作目录只读（写不进去）时也不至于开不了局——此时直接用内置那份，不落盘。
     ///
     /// v2.5.0：路径解析抽到 <see cref="UndercoverWordBank.ResolvePath"/>，
     /// 与「管理员远程编辑词库」共用同一份解析（否则会出现「编辑改了 A、下一局读 B」）。
+    ///
+    /// 发布清理：<c>EnsureSample</c> 的**副作用**（首次生成一份词库文件）是功能、必须保留；
+    /// 它顺带返回的那句告警原本被 <c>Console.WriteLine</c> 直接打到服务端控制台 ——
+    /// 那是全仓唯一的裸调试打印，已移除。词库缺失 / 写不进去时玩法仍由
+    /// <see cref="UndercoverWordBank.LoadOrDefault"/> 兜底（用内置那份，不落盘），不会开不了局。
     /// </summary>
     private List<UndercoverWordBank.Pair> LoadWordBank()
     {
         var path = UndercoverWordBank.ResolvePath(Directory.GetCurrentDirectory(), _rules.WordFile);
 
-        var warning = UndercoverWordBank.EnsureSample(path);
-        if (warning != null) Console.WriteLine(warning);
+        // 只要副作用（缺词库时生成一份）；返回的告警文本不再打印。
+        _ = UndercoverWordBank.EnsureSample(path);
 
         return UndercoverWordBank.LoadOrDefault(path);
     }

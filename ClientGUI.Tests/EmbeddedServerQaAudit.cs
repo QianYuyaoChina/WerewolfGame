@@ -195,7 +195,7 @@ public static class EmbeddedServerQaAudit
             }
         }
 
-        // ---- 主题：WarnBrush 两套都有，且 LoginWindow.xaml 无硬编码色值 ----
+        // ---- 主题：WarnBrush 两套都有，且 LoginPage.xaml 无硬编码色值 ----
         if (root != null)
         {
             var dark = Path.Combine(root, "ClientGUI", "Themes", "Colors.Dark.xaml");
@@ -216,13 +216,14 @@ public static class EmbeddedServerQaAudit
                 Check.NotEqual(darkValue, lightValue, "QA：WarnBrush 在两套主题里取不同色值（不是复制粘贴）");
             }
 
-            var login = Path.Combine(root, "ClientGUI", "Views", "LoginWindow.xaml");
-            Check.True(File.Exists(login), "QA：LoginWindow.xaml 存在");
+            // S4：LoginWindow.xaml 已随旧窗口删除，扫描对象改指它迁过去的页面（判据一字未改）。
+            var login = Path.Combine(root, "ClientGUI", "Views", "Pages", "LoginPage.xaml");
+            Check.True(File.Exists(login), "QA：LoginPage.xaml 存在（旧 LoginWindow.xaml 已于 S4 删除）");
             if (File.Exists(login))
             {
                 var hard = HardcodedColors(File.ReadAllText(login));
                 Check.Equal(0, hard.Count,
-                    "QA：LoginWindow.xaml 无硬编码色值（一律 DynamicResource）" +
+                    "QA：LoginPage.xaml 无硬编码色值（一律 DynamicResource）" +
                     (hard.Count > 0 ? "：" + string.Join(", ", hard) : ""));
             }
         }

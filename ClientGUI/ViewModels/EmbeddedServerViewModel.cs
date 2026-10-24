@@ -385,6 +385,20 @@ public sealed class EmbeddedServerViewModel : ObservableObject
         OnPropertyChanged(nameof(MainButtonText));
     }
 
+    /// <summary>
+    /// 刷新派生文案（主按钮「一键开服 / 进入房间列表」等）。
+    ///
+    /// 页面化之后需要它：登录页是根页，从房间列表「返回」回来时页面实例与视图模型都还在，
+    /// 但绑定不会自动重算 <c>MainButtonText</c> —— 此时若服务器仍在跑且已登录，
+    /// 主按钮必须显示「进入房间列表」（Q1=B 的兜底分支，架构 N4）。
+    /// </summary>
+    public void RefreshComputedState()
+    {
+        OnPropertyChanged(nameof(IsOneClickDone));
+        OnPropertyChanged(nameof(CanOneClick));
+        OnPropertyChanged(nameof(MainButtonText));
+    }
+
     /// <summary>停止运行信息的轮询并退订服务事件（窗口关闭时调用，避免留下悬挂引用）。</summary>
     public void StopPolling()
     {

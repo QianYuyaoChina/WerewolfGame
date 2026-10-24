@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using ClientGUI.Controls;
 using ClientGUI.Services;
 using ClientGUI.Views;
+using ClientGUI.Views.Pages;
 using Werewolf.Client.Share;
 using Werewolf.Server;
 
@@ -43,18 +44,17 @@ public static class AppShellGuard
         "DataGrid", "PropertyGrid", "Ribbon", "Canvas.Left", "Canvas.Top"
     };
 
-    /// <summary>迁移范围内需要「导航栏 + 通栏主按钮」的窗口（主窗口只迁移骨架，底部没有主按钮）。</summary>
-    private static readonly (string Name, Func<Window> Create, bool ExpectPrimary)[] MigratedWindows =
-    {
-        ("登录窗口", () => new LoginWindow(), true),
-        ("房间列表窗口", () => new RoomListWindow(new GameClient()), true),
-        ("房间内主窗口", () => new MainWindow(new GameClient()), false),
-        ("创建房间窗口", () => new CreateRoomWindow(), true),
-        ("房主设置窗口", () => new HostSettingsWindow(new GameClient()), true),
-        ("设置窗口", () => new SettingsWindow(), true),
-        ("邀请码窗口", () => new InviteCodeWindow("WW1:SHELL-GUARD"), true),
-        ("保留房间窗口", () => new KeepRoomWindow(), true)
-    };
+    /// <summary>
+    /// 迁移范围内需要「导航栏 + 通栏主按钮」的**页面**（S4 起全部是页面；房间页只迁骨架，底部没有主按钮）。
+    ///
+    /// v2.6.0 S4（待办 T37）：原来是 8 个旧 `Window` 的表，现在直接吃
+    /// <see cref="PageCatalog.SkeletonGuarded"/>（10 页）—— **旧删 8 / 新覆盖 10，净不减**，
+    /// 而且从此只有一张表，不会再出现「窗口表与页面表各管一半」。
+    /// </summary>
+    private static readonly (string Name, Func<AppSession, FrameworkElement> Create, double Width, double Height, bool ExpectPrimary)[]
+        MigratedPages = PageCatalog.SkeletonGuarded
+            .Select(p => (p.Name, (Func<AppSession, FrameworkElement>)p.Create, p.DesignWidth, p.DesignHeight, p.ExpectPrimary))
+            .ToArray();
 
     /// <summary>
     /// 风格守护（A1–A6）+ 称号胶囊的渲染守护。挂在 <c>--ui</c>（要实例化控件并解析主题资源）。
@@ -69,6 +69,84 @@ public static class AppShellGuard
         CheckTapTargets();          // A4
         CheckOverlayDialog();       // 新增对话框一律页面内浮层（K11）
         CheckTitleChip();           // 第 4 条：称号胶囊（金 / 小一档 / 无称号不渲染）
+        CheckTitleContrast();       // v2.6.0 S5 / Q-B3-01：称号金的 WCAG 对比度（算，不靠眼估）
+
+        // v2.6.0 S4：保留房间的**四条真出口**必须在 STA 上跑（要构造 `KeepRoomPage`）。
+        // 纯函数那 4 条不需要 WPF，仍留在 `RunLogicGuards`（默认组）。
+        CheckKeepRoomExitPaths();
+    }
+
+    /// <summary>
+    /// v2.6.0 S5 / Q-B3-01：称号金的**可计算**对比度断言（WCAG 2.x 相对亮度比）。
+    ///
+    /// 背景：S4 终验时发现 `Colors.Light.xaml` 的 `TitleTextBrush` 是 `#B07D12`，压在
+    /// `CardBrush(#E7EDF6)` 上实测只有 **3.08:1**，而那一行的注释**已经写着「保证 ≥ 4.5:1」**——
+    /// 注释撒谎，因为从来没人算过。B3-QA 那条断言用的是 ≥3:1（"大字/图形"档），所以它一直是绿的，
+    /// **没能把 AA 正文档的缺口拦住**。
+    ///
+    /// 这里补的是**算出来**的那一条：两套主题都算，阈值 **4.5**（AA 正文档）；同时保留
+    /// 「必须是金色系」的形状判据（`R &gt; G &gt; B` 且 `R − B ≥ 40`），防止有人为了凑对比度
+    /// 把金色调成棕色/灰色 —— 对比度够了、语义没了，同样不行。
+    /// </summary>
+    private static void CheckTitleContrast()
+    {
+        const double AaNormalText = 4.5;
+
+        var dark = new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/ClientGUI;component/Themes/Colors.Dark.xaml")
+        };
+        var light = new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/ClientGUI;component/Themes/Colors.Light.xaml")
+        };
+
+        foreach (var (theme, dict, mustPassAa) in new[] { ("深色", dark, true), ("浅色", light, true) })
+        {
+            var fg = (dict["TitleTextBrush"] as System.Windows.Media.SolidColorBrush)?.Color;
+            var bg = (dict["CardBrush"] as System.Windows.Media.SolidColorBrush)?.Color;
+
+            if (fg == null || bg == null)
+            {
+                Check.True(false, $"S5·对比度：{theme}主题取得到 TitleTextBrush / CardBrush");
+                continue;
+            }
+
+            var ratio = ContrastRatio(fg.Value, bg.Value);
+            Console.WriteLine($"   · S5 对比度（{theme}）：称号金 {fg} 压 {bg} → {ratio:F2}:1");
+
+            Check.True(!mustPassAa || ratio >= AaNormalText,
+                $"S5·Q-B3-01：{theme}主题称号金对比度 ≥ {AaNormalText}:1（实测 {ratio:F2}:1）");
+
+            // 金色系：R > G > B（暖金的方向）且 R − B ≥ 40（足够"金"，不至于被压成土棕）。
+            Check.True(fg.Value.R > fg.Value.G && fg.Value.G > fg.Value.B &&
+                       fg.Value.R - fg.Value.B >= 40,
+                $"S5·Q-B3-01：{theme}主题仍是金色系（R{fg.Value.R}>G{fg.Value.G}>B{fg.Value.B}，" +
+                $"R−B={fg.Value.R - fg.Value.B} ≥ 40）");
+        }
+    }
+
+    /// <summary>
+    /// WCAG 2.x 相对亮度比：<c>(L_亮 + 0.05) / (L_暗 + 0.05)</c>。
+    /// 不依赖任何外部实现，纯算术 —— 这样"对比度够不够"是可复算的事实，而不是看图说话。
+    /// </summary>
+    private static double ContrastRatio(System.Windows.Media.Color a, System.Windows.Media.Color b)
+    {
+        var la = RelativeLuminance(a);
+        var lb = RelativeLuminance(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
+    /// <summary>WCAG 相对亮度（sRGB → 线性化后按 0.2126 / 0.7152 / 0.0722 加权）。</summary>
+    private static double RelativeLuminance(System.Windows.Media.Color c)
+    {
+        static double Linear(byte channel)
+        {
+            var s = channel / 255.0;
+            return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+        }
+
+        return 0.2126 * Linear(c.R) + 0.7152 * Linear(c.G) + 0.0722 * Linear(c.B);
     }
 
     // ==================== 纯逻辑守护（默认组，不需要 STA） ====================
@@ -86,6 +164,7 @@ public static class AppShellGuard
         CheckTitleProtocol();
         CheckLocalStatePurity();
         CheckAccountFileCompatibility();
+        CheckKeepRoomDecision();
     }
 
     /// <summary>
@@ -129,6 +208,206 @@ public static class AppShellGuard
         {
             try { File.Delete(path); } catch { /* 临时文件删不掉不影响 */ }
         }
+    }
+
+    /// <summary>
+    /// 收尾轮 BugFix：「直接关闭保留房间窗口」必须被当成「保留房间」。
+    /// 纯函数 <see cref="KeepRoomDecision.Resolve"/> 把 <c>null</c> 当保留；再加一条**行为级**守护，
+    /// 防止将来重构时丢掉「X / Alt+F4 / Esc 直接关掉」这条兜底（空选择不会误删房间）。
+    ///
+    /// ⚠ S4 迁移：原来是**源码级** grep（读 <c>KeepRoomWindow.xaml.cs</c>，找 <c>OnClosing</c> /
+    /// <c>DialogResult is null</c>）。窗口类删掉后，同样的兜底改由「浮层出栈时结果为 <c>null</c>」承担，
+    /// 所以这里换成**真的走一遍页面栈**：三条出口（外壳 × / 返回 / 两个按钮）逐条过，
+    /// 每条都断言「交给调用方的 <c>bool?</c>」以及「<see cref="KeepRoomDecision.Resolve"/> 翻译出来的布尔」。
+    /// 比 grep 更硬：grep 只能证明"代码里有这行"，这里证明"这一行真的产生保留的结果"。
+    /// </summary>
+    private static void CheckKeepRoomDecision()
+    {
+        // 纯函数三态：null（用户没显式选）= 保留；其余按原值。
+        // ⚠ 这一段**只需要纯逻辑**，所以留在默认组（`RunLogicGuards`）。行为级那 10 条
+        //   需要 STA（要构造 `KeepRoomPage`），已拆到 `CheckKeepRoomExitPaths` 挂 `--ui`。
+        Check.True(KeepRoomDecision.Resolve(null), "保留房间：直接关闭窗口（DialogResult=null）= 保留");
+        Check.True(KeepRoomDecision.Resolve(true), "保留房间：显式「保留房间」= 保留");
+        Check.False(KeepRoomDecision.Resolve(false), "保留房间：显式「关闭房间」= 不保留");
+        Check.True(KeepRoomDecision.Resolve(null) != false,
+            "保留房间：null 绝不能退化成「不保留」（这正是先前 Bug 的根因）");
+
+        // v2.6.0 S8：三选一通道。取消必须能被表达出来，且不能挤掉 I6 的「null ⇒ 保留」。
+        Check.True(KeepRoomDecision.ResolveChoice(null) == KeepRoomChoice.Keep,
+            "S8：没显式选（null）→ Keep（与 Resolve(null) 同一条规矩，I6 不许退化）");
+        Check.True(KeepRoomDecision.ResolveChoice(true) == KeepRoomChoice.Keep,
+            "S8：显式 true → Keep");
+        Check.True(KeepRoomDecision.ResolveChoice(false) == KeepRoomChoice.Close,
+            "S8：显式 false → Close");
+        Check.True(KeepRoomDecision.ResolveChoice(KeepRoomChoice.Cancel) == KeepRoomChoice.Cancel,
+            "S8：Cancel 原样穿过（只有这条通道能表达「不退出房间」）");
+        Check.True(KeepRoomDecision.ResolveChoice(null) == KeepRoomDecision.ResolveChoice(true),
+            "S8：null 与「保留房间」落到同一个结局（翻译只有一份，没有第二个判定点）");
+        Check.True(KeepRoomDecision.Resolve(null) && !KeepRoomDecision.Resolve(false),
+            "S8：Resolve 仍是 ResolveChoice 的薄封装（老调用点语义不变）");
+    }
+
+    /// <summary>
+    /// 行为级守护：四条出口在**真页面栈**上的结果（替代已删除窗口的 <c>OnClosing</c> 源码 grep）。
+    ///
+    /// ⚠ **S4 验收回修**：原来这 10 条和上面那 4 条纯函数挤在同一个方法里，而那个方法挂在
+    /// `RunLogicGuards()`（默认组 = **MTA**）。`KeepRoomPage` 是 `UserControl`，**构造要求 STA**，
+    /// 于是整块直接抛「调用线程必须为 STA」，只剩 1 条 fallback 红。
+    /// 现在按「要不要 WPF 上下文」拆开：纯函数留默认组，行为级挂 <c>--ui</c>（STA）。
+    /// </summary>
+    private static void CheckKeepRoomExitPaths()
+    {
+        Console.WriteLine("   —— S4：保留房间四条出口（真页面栈，STA） ——");
+        try
+        {
+            // 出口 1：外壳点 ×（= DismissOverlay，没显式选）→ null → 保留。
+            var byClose = DriveKeepRoomOverlay(dismiss: true, click: null);
+            Check.True(byClose.Choice == KeepRoomChoice.Keep,
+                "保留房间：外壳点 ×（没显式选）→ 保留（不是「不保留」，X / Alt+F4 兜底仍在）");
+            Check.Equal(2, byClose.DepthOpen, "保留房间：询问以浮层入栈，栈深 2（列表 + 询问各一层）");
+            Check.Equal(1, byClose.DepthAfter, "保留房间：外壳点 × 只弹掉询问这一层，下层页面还在（栈深回 1）");
+
+            // 出口 2：返回 / Esc（= BackAsync，没显式选）→ 保留。
+            var byBack = DriveKeepRoomOverlay(dismiss: false, click: null);
+            Check.True(byBack.Choice == KeepRoomChoice.Keep,
+                "保留房间：返回 / Esc（没显式选）→ 保留");
+            Check.Equal(2, byBack.DepthOpen, "保留房间：返回 / Esc 时栈深仍是 2（浮层只加一层）");
+            Check.Equal(1, byBack.DepthAfter, "保留房间：返回 / Esc 只弹掉询问这一层（栈深回 1）");
+
+            // 出口 3 / 4：两个按钮走真 Click 事件处理器（不是直接调私有方法）。
+            var keep = DriveKeepRoomOverlay(dismiss: false, click: "PrimaryAction");
+            Check.True(keep.Choice == KeepRoomChoice.Keep, "保留房间：「保留房间」按钮交回 Keep");
+            Check.Equal(2, keep.DepthOpen, "保留房间：点「保留房间」时栈深仍是 2");
+            Check.Equal(1, keep.DepthAfter, "保留房间：「保留房间」按钮也只弹掉询问这一层（栈深回 1）");
+
+            var close = DriveKeepRoomOverlay(dismiss: false, click: "CloseRoomAction");
+            Check.True(close.Choice == KeepRoomChoice.Close, "保留房间：「关闭房间」按钮交回 Close");
+            Check.Equal(2, close.DepthOpen, "保留房间：点「关闭房间」时栈深仍是 2");
+            Check.Equal(1, close.DepthAfter, "保留房间：「关闭房间」按钮也只弹掉询问这一层（栈深回 1）");
+
+            // 出口 5（v2.6.0 S8）：「取消」= 不退出房间。
+            // ⚠ 它是**第三种**结局，不能退化成 Keep（会变成退房）也不能退化成 Close（会把房间关掉）。
+            var cancel = DriveKeepRoomOverlay(dismiss: false, click: "CancelAction");
+            Check.True(cancel.Choice == KeepRoomChoice.Cancel,
+                "保留房间：「取消」按钮交回 Cancel（既不是保留也不是关闭 —— 连退房都不做）");
+            Check.True(cancel.Choice != KeepRoomChoice.Keep && cancel.Choice != KeepRoomChoice.Close,
+                "保留房间：「取消」绝不能退化成「保留」/「关闭」中的任何一个");
+            Check.Equal(2, cancel.DepthOpen, "保留房间：点「取消」时栈深仍是 2");
+            Check.Equal(1, cancel.DepthAfter, "保留房间：点「取消」只弹掉询问这一层（回到下层房间页）");
+
+            // v2.6.0 S8：「退房后回到房间列表」在**真页面栈**上的落点。
+            // 这是用户报的那个现象的正面判据：询问里点任意一个按钮，
+            // 栈顶必须是房间列表页，不能停在房间页（不需要连服务器，只走导航这一层）。
+            var session = new AppSession();
+            var nav = session.Navigation;
+            nav.Reset(new PageRequest(PageId.RoomList));
+            nav.Push(new PageRequest(PageId.Room));
+            Check.Equal(2, nav.Depth, "S8：列表 → 房间，栈深 2");
+            Check.True(nav.Current is RoomPage, "S8：栈顶是房间页（退房前）");
+
+            Check.True(nav.PopTo(PageId.RoomList), "S8：退房后 PopTo(房间列表) 成功");
+            Check.True(nav.Current is RoomListPage,
+                "S8：退房后栈顶必须是**房间列表页**，不是房间页（用户报的现象的正面判据）");
+            Check.Equal(1, nav.Depth, "S8：退房后栈深回到 1（只弹掉房间这一层）");
+
+            // 判定点唯一（T48）：三态翻译只允许在 RoomPage 出现一次。
+            var root = FindRepoRoot();
+            if (root == null)
+            {
+                Check.True(false, "保留房间：能定位仓库根目录（唯一判定点守卫的取样前提）");
+                return;
+            }
+
+            var gui = Path.Combine(root, "ClientGUI");
+            var resolveSites = new List<string>();
+            foreach (var file in Directory.EnumerateFiles(gui, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                    file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                    continue;
+
+                var hits = Regex.Matches(File.ReadAllText(file), @"KeepRoomDecision\.Resolve\s*\(").Count;
+                for (var i = 0; i < hits; i++) resolveSites.Add(Path.GetFileName(file));
+            }
+
+            Check.SequenceEqual(new[] { "RoomPage.xaml.cs" }, resolveSites,
+                "保留房间：全仓只有一处调用 KeepRoomDecision.Resolve（实际：" + string.Join(",", resolveSites) + "）");
+
+            // T48：旧窗口时代那套「返回值可空 + ?? false」的同步判定入口必须彻底消失。
+            // ⚠ 两处易踩的坑，判据必须避开：
+            //   ① `RoomPage` 里有一个**异步**方法 `ResolveKeepRoomAsync(...)` —— 名字里带
+            //      "ResolveKeepRoom"，所以只认**带左括号的无参调用形态** `ResolveKeepRoom(`，
+            //      否则这条会在改对之后恒红；
+            //   ② 注释里提到旧名字不算残留（那是解释为什么删），所以先剥掉行注释再匹配。
+            var straySync = Directory.EnumerateFiles(gui, "*.cs", SearchOption.AllDirectories)
+                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                            && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .SelectMany(f =>
+                {
+                    var code = Regex.Replace(File.ReadAllText(f), @"//[^\n]*", "");
+                    return new[] { "ResolveKeepRoom(", "ConfirmKeepRoom" }
+                        .Where(token => code.Contains(token, StringComparison.Ordinal))
+                        .Select(token => $"{Path.GetFileName(f)}:{token}");
+                })
+                .ToList();
+            Check.Equal(0, straySync.Count,
+                "保留房间：同步询问入口已归零（T48 判据 ResolveKeepRoom( + ConfirmKeepRoom，残留：" +
+                string.Join(",", straySync) + "）");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("   · 保留房间出口自检异常：" + ex.Message);
+            Check.True(false, "保留房间：四条出口（× / 返回 / 保留 / 关闭）在真页面栈上均可验证");
+        }
+    }
+
+    /// <summary>
+    /// 走一遍真的「退房询问」浮层：压栈 → 用指定出口出栈 → 把交回来的 <c>bool?</c> 拿出来。
+    /// <paramref name="dismiss"/> 走外壳 × 的等价物（<see cref="NavigationService.DismissOverlay"/>），
+    /// 否则走 <see cref="NavigationService.BackAsync"/>；<paramref name="click"/> 非空时改成点页面上的按钮。
+    /// </summary>
+    private static (KeepRoomChoice Choice, int DepthAfter, int DepthOpen) DriveKeepRoomOverlay(bool dismiss, string? click)
+    {
+        var session = new AppSession();
+        var nav = session.Navigation;
+
+        // 下层先放一页，才能验证「询问是浮层、弹完只弹自己这一层」。
+        nav.Reset(new PageRequest(PageId.RoomList));
+
+        var pending = nav.PushForDecisionAsync(new PageRequest(PageId.KeepRoom));
+        var page = nav.Current as KeepRoomPage;
+        if (page == null || !nav.CurrentIsOverlay)
+            throw new InvalidOperationException("退房询问没有以浮层方式入栈");
+
+        // 入栈后栈深必须是 2（房间列表 + 询问浮层各一层）：这是「浮层只加一层」的判据。
+        var depthOpen = nav.Depth;
+
+        if (click != null)
+        {
+            if (page.FindName(click) is not Button button)
+                throw new InvalidOperationException($"询问页上找不到按钮 {click}");
+
+            // 真 Click 事件：走 XAML 里绑的那个处理器，不碰私有方法。
+            button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        }
+        else if (dismiss)
+        {
+            nav.DismissOverlay();
+        }
+        else
+        {
+            _ = nav.BackAsync();
+        }
+
+        // 结果通道是 TaskCompletionSource，出栈后应立刻有值（不依赖消息循环）。
+        if (!pending.Wait(TimeSpan.FromSeconds(2)))
+            throw new TimeoutException("退房询问的结果没有在 2 秒内回来");
+
+        // 出栈后栈深必须回到 1：只弹掉询问这一层，下层房间列表页还在（不是把两层一起弹掉）。
+        if (!pending.IsCompleted)
+            throw new TimeoutException("退房询问的结果通道没有产出结果");
+
+        return (pending.Result, nav.Depth, depthOpen);
     }
 
     /// <summary>B2：四种关闭来源的行为表（架构 D8 / K9）。</summary>
@@ -362,52 +641,46 @@ public static class AppShellGuard
     // ==================== A3 + A5 · 骨架与通栏主按钮 ====================
 
     /// <summary>
-    /// 每个迁移窗口都要有「导航栏 + 居中标题」，主操作按钮必须通栏（≥ 内容区 80%）。
+    /// 每个迁移页面都要有「导航栏 + 居中标题」，主操作按钮必须通栏（≥ 内容区 80%）。
+    /// v2.6.0 S4：载体从旧窗口换成页面（断言条数与阈值一条未改）。
     /// </summary>
     private static void CheckWindowSkeletons()
     {
         var withPrimary = 0;
 
-        foreach (var (name, create, expectPrimary) in MigratedWindows)
+        foreach (var (name, create, width, height, expectPrimary) in MigratedPages)
         {
-            Window? window = null;
             try
             {
-                window = create();
-                if (window == null)
+                var root = create(new AppSession());
+                if (root == null)
                 {
                     Check.True(false, $"风格 A3：{name} 未能实例化");
                     continue;
                 }
 
-                CheckNavBar(window, name);
+                Layout(root, width, height);
+                CheckNavBar(root, name);
 
                 if (!expectPrimary) continue;
 
-                var root = window.Content as FrameworkElement;
-                if (root == null)
-                {
-                    Check.True(false, $"风格 A5：{name} 的内容根元素不是 FrameworkElement");
-                    continue;
-                }
-
-                if (window is LoginWindow && window.FindName("Tabs") is TabControl tabs)
+                if (root is LoginPage && root.FindName("Tabs") is TabControl tabs)
                 {
                     // 两个标签页各有一个主按钮：切页后分别测量（未选中的页没有视觉树）。
                     for (var i = 0; i < tabs.Items.Count; i++)
                     {
                         tabs.SelectedIndex = i;
-                        Layout(root, window);
+                        Layout(root, width, height);
                         var key = i == 0 ? "EmbeddedPrimaryAction" : "PrimaryAction";
-                        CheckBlockButton(window, root, key, $"{name}·第{i + 1}页");
+                        CheckBlockButton(root, key, $"{name}·第{i + 1}页");
                     }
 
                     tabs.SelectedIndex = 0;
                 }
                 else
                 {
-                    Layout(root, window);
-                    CheckBlockButton(window, root, "PrimaryAction", name);
+                    Layout(root, width, height);
+                    CheckBlockButton(root, "PrimaryAction", name);
                 }
 
                 withPrimary++;
@@ -417,25 +690,22 @@ public static class AppShellGuard
                 Console.WriteLine($"   · 风格检查（{name}）异常：{ex.Message}");
                 Check.True(false, $"风格 A3：{name} 骨架检查无异常");
             }
-            finally
-            {
-                try { window?.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
-            }
         }
 
-        Check.True(withPrimary >= 7, $"风格 A5：{withPrimary} 个窗口带通栏主按钮（≥7）");
+        Check.True(withPrimary >= 7, $"风格 A5：{withPrimary} 个页面带通栏主按钮（≥7）");
     }
 
     /// <summary>A3：存在导航栏结构元素（高 ≥56）且标题居中。</summary>
-    private static void CheckNavBar(Window window, string name)
+    private static void CheckNavBar(FrameworkElement page, string name)
     {
-        var bar = window.FindName("NavBar") as FrameworkElement;
+        var bar = page.FindName("NavBar") as FrameworkElement;
         Check.True(bar != null, $"风格 A3：{name} 有导航栏结构元素（NavBar）");
         if (bar != null)
-            Check.True(bar.MinHeight >= 56, $"风格 A3：{name} 导航栏高 ≥56（实际 {bar.MinHeight}）");
+            Check.True(bar.MinHeight >= 56 || bar.ActualHeight >= 56,
+                $"风格 A3：{name} 导航栏高 ≥56（MinHeight {bar.MinHeight} / 实测 {bar.ActualHeight:F1}）");
 
-        FrameworkElement? title = window.FindName("NavTitleText") as TextBlock;
-        title ??= window.FindName("NavTitleButton") as Button;
+        FrameworkElement? title = page.FindName("NavTitleText") as TextBlock;
+        title ??= page.FindName("NavTitleButton") as Button;
 
         Check.True(title != null, $"风格 A3：{name} 有导航标题（NavTitleText / NavTitleButton）");
         if (title != null)
@@ -444,13 +714,13 @@ public static class AppShellGuard
     }
 
     /// <summary>A5：主操作按钮通栏（宽度 ≥ 内容区 80%）。</summary>
-    private static void CheckBlockButton(Window window, FrameworkElement root, string elementName, string label)
+    private static void CheckBlockButton(FrameworkElement page, string elementName, string label)
     {
-        var button = window.FindName(elementName) as Button;
+        var button = page.FindName(elementName) as Button;
         Check.True(button != null, $"风格 A5：{label} 有主操作按钮（{elementName}）");
         if (button == null) return;
 
-        var content = root.ActualWidth;
+        var content = page.ActualWidth;
         Check.True(content > 0, $"风格 A5：{label} 内容区已完成布局（宽度 {content}）");
         if (content <= 0) return;
 
@@ -459,13 +729,11 @@ public static class AppShellGuard
             $"风格 A5：{label} 的主按钮通栏（{button.ActualWidth:F0}/{content:F0} = {ratio:P0} ≥ 80%）");
     }
 
-    /// <summary>未显示的窗口也要先做一次完整布局，才能读到 ActualWidth。</summary>
-    private static void Layout(FrameworkElement root, Window window)
+    /// <summary>页面没有 Width/Height：按设计尺寸做一次完整布局，才能读到 ActualWidth。</summary>
+    private static void Layout(FrameworkElement root, double width, double height)
     {
-        var size = new Size(double.IsNaN(window.Width) ? 1024 : window.Width,
-                            double.IsNaN(window.Height) ? 768 : window.Height);
-        root.Measure(size);
-        root.Arrange(new Rect(0, 0, size.Width, size.Height));
+        root.Measure(new Size(width, height));
+        root.Arrange(new Rect(0, 0, width, height));
         root.UpdateLayout();
     }
 
@@ -476,11 +744,11 @@ public static class AppShellGuard
     /// </summary>
     private static void CheckTapTargets()
     {
-        var window = new RoomListWindow(new GameClient());
-        try
+        // v2.6.0 S4：载体从旧 RoomListWindow 换成 RoomListPage（断言一条未改）。
+        var page = new RoomListPage(new AppSession());
         {
             // —— 列表行 ——
-            var list = window.FindName("RoomList") as ListBox;
+            var list = page.FindName("RoomList") as ListBox;
             Check.True(list?.ItemTemplate != null, "风格 A4：房间列表有行模板");
             if (list?.ItemTemplate != null)
             {
@@ -495,7 +763,7 @@ public static class AppShellGuard
             }
 
             // —— 通栏主按钮 ——
-            var primary = window.FindResource("BlockPrimaryButton") as Style;
+            var primary = page.FindResource("BlockPrimaryButton") as Style;
             Check.True(primary != null, "风格 A4：AppShell 提供 BlockPrimaryButton（通栏主按钮）");
             if (primary != null)
             {
@@ -506,7 +774,7 @@ public static class AppShellGuard
             }
 
             // —— 导航栏图标按钮 ——
-            var icon = window.FindResource("NavIconButton") as Style;
+            var icon = page.FindResource("NavIconButton") as Style;
             Check.True(icon != null, "风格 A4：AppShell 提供 NavIconButton（导航热区按钮）");
             if (icon != null)
             {
@@ -516,7 +784,7 @@ public static class AppShellGuard
             }
 
             // —— 输入框 ——
-            var field = window.FindResource("FieldInput") as Style;
+            var field = page.FindResource("FieldInput") as Style;
             Check.True(field != null, "风格 A4：AppShell 提供 FieldInput（表单输入框）");
             if (field != null)
             {
@@ -525,10 +793,6 @@ public static class AppShellGuard
                 Check.True(box.DesiredSize.Height >= 44,
                     $"风格 A4：输入框高度 ≥44（实际 {box.DesiredSize.Height:F0}）");
             }
-        }
-        finally
-        {
-            try { window.Close(); } catch { /* 未显示的窗口关闭失败可忽略 */ }
         }
     }
 

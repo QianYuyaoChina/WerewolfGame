@@ -1,0 +1,177 @@
+<!--
+    ⚠ 页面与窗口的三点差别见 CreateRoomPage.xaml 顶部注释（DynamicResource / UserControl 祖先 / 无 DialogResult）。
+
+    本页由 Views/AboutWindow.xaml 原样搬迁（v2.6.0 S3 页面化，架构 §9.1）。
+    **形体一个都不能少**（上轮有人误删过，别重演）：
+      · 🐺 图标（58×58 圆角徽章）+ 产品名 + 「v 版本」胶囊 + 框架说明；
+      · 简介段；
+      · 信息表三行：解决方案 / 客户端 / 网络加密；
+      · 技术栈徽章（WrapPanel 自动换行）；
+      · 免责说明；
+      · 「更新日志」「关闭」两个按钮（右对齐，与旧窗口一致）。
+    尺寸沿用旧窗口 470×560（页面在 1020×720 的外壳里会自然铺开，内容宽度不变）。
+
+    入栈方式：**Push（换页）**。关于 / 更新日志是「离开房间去看文档」，不是「盖在房间上做决策」——
+    与设置 / 房主设置 / 邀请码 / 保留房间四类浮层区分开（架构 §9.1 + 主理人 S3 裁定）。
+-->
+<UserControl x:Class="ClientGUI.Views.Pages.AboutPage"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:local="clr-namespace:ClientGUI"
+        mc:Ignorable="d"
+        Background="{DynamicResource BgBrush}"
+        Foreground="{DynamicResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        UseLayoutRounding="True">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- 导航栏 -->
+            <RowDefinition Height="*" />     <!-- 内容 -->
+            <RowDefinition Height="Auto" />  <!-- 底部按钮 -->
+        </Grid.RowDefinitions>
+
+        <!-- ═══════════════ 导航栏（*|Auto|* 三列：标题几何居中） ═══════════════ -->
+        <Border x:Name="NavBar" Grid.Row="0" Style="{StaticResource NavBarPanel}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal"
+                            HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <Button Content="返回" Style="{StaticResource NavIconButton}"
+                            Click="Back_OnClick" ToolTip="回到打开本页的那一页" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="1" x:Name="NavTitleText" Text="关于"
+                           Style="{StaticResource NavTitleText}" />
+
+                <TextBlock Grid.Column="2" HorizontalAlignment="Right" />
+            </Grid>
+        </Border>
+
+        <!-- ═══════════════ 内容 ═══════════════ -->
+        <ScrollViewer Grid.Row="1" Style="{StaticResource PageScroll}" Margin="28,20,28,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />  <!-- 标题 -->
+                    <RowDefinition Height="Auto" />  <!-- 简介 -->
+                    <RowDefinition Height="Auto" />  <!-- 信息表 -->
+                    <RowDefinition Height="Auto" />  <!-- 技术栈 -->
+                    <RowDefinition Height="*" />     <!-- 说明 -->
+                </Grid.RowDefinitions>
+
+                <!-- ═══════════════ 标题 ═══════════════ -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal">
+                    <!-- 58×58 的 🐺 徽章：尺寸是旧窗口的契约，页面化不许改（守护断言量的是这两个数）。 -->
+                    <Border x:Name="AppIcon" Width="58" Height="58" CornerRadius="14"
+                            Background="{DynamicResource CardBrush}" VerticalAlignment="Center">
+                        <TextBlock Text="🐺" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Static local:AppInfo.ProductName}" FontSize="20" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextBrush}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Border Background="{DynamicResource AccentBrush}" CornerRadius="4" Padding="8,2">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="v" FontSize="11.5" Foreground="White" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Static local:AppInfo.Version}" FontSize="11.5"
+                                               Foreground="White" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="{x:Static local:AppInfo.Framework}" FontSize="11.5" Margin="10,3,0,0"
+                                       Foreground="{DynamicResource MutedBrush}" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ═══════════════ 简介 ═══════════════ -->
+                <TextBlock Grid.Row="1" Text="{x:Static local:AppInfo.Description}" FontSize="12.5"
+                           TextWrapping="Wrap" Margin="0,20,0,0" LineHeight="20"
+                           Foreground="{DynamicResource TextSoftBrush}" />
+
+                <!-- ═══════════════ 信息表（三行，缺一行都会被守护断言抓到） ═══════════════ -->
+                <Border x:Name="InfoTable" Grid.Row="2" Margin="0,18,0,0" Background="{DynamicResource CardBrush}"
+                        CornerRadius="8" Padding="16,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="86" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="解决方案" Style="{StaticResource MutedText}" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{x:Static local:AppInfo.SolutionName}"
+                                   FontSize="12.5" Foreground="{DynamicResource TextBrush}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="客户端" Style="{StaticResource MutedText}"
+                                   Margin="0,8,0,0" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" FontSize="12.5"
+                                   Foreground="{DynamicResource TextBrush}"
+                                   Text="WPF 图形界面 · 控制台（共用核心库）" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="网络加密" Style="{StaticResource MutedText}"
+                                   Margin="0,8,0,0" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" FontSize="12.5"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"
+                                   Text="PSK 认证 DH 握手 + AES-GCM 会话加密" />
+                    </Grid>
+                </Border>
+
+                <!-- ═══════════════ 技术栈徽章 ═══════════════ -->
+                <StackPanel Grid.Row="3" Margin="0,18,0,0">
+                    <TextBlock Text="技术栈" Style="{StaticResource SectionTitle}" Margin="0,0,0,8" />
+                    <ItemsControl x:Name="TechStackList" ItemsSource="{x:Static local:AppInfo.TechStack}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource PanelAltBrush}" CornerRadius="10"
+                                        BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
+                                        Padding="10,4" Margin="0,0,8,8">
+                                    <TextBlock Text="{Binding}" FontSize="11.5"
+                                               Foreground="{DynamicResource TextSoftBrush}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- ═══════════════ 说明 ═══════════════ -->
+                <TextBlock Grid.Row="4" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap" LineHeight="18"
+                           VerticalAlignment="Top" Foreground="{DynamicResource FaintBrush}"
+                           Text="本项目用于学习与演示。程序按“现状”提供，作者不对其适用性或运行结果作任何明示或暗示的担保。" />
+            </Grid>
+        </ScrollViewer>
+
+        <!-- ═══════════════ 底部按钮（右对齐，与旧窗口一致；不设通栏主按钮） ═══════════════ -->
+        <Border Grid.Row="2" Style="{StaticResource FooterBar}">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="ChangelogButton" Content="更新日志" Style="{StaticResource FlatButton}"
+                        Padding="16,8" Click="OpenChangelog_OnClick" />
+                <Button x:Name="CloseAction" Content="关闭" Style="{StaticResource PrimaryButton}"
+                        Padding="22,8" Margin="10,0,0,0" Click="Close_OnClick" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,38 +1,37 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using ClientGUI.Controls;
 using ClientGUI.Services;
 using ClientGUI.ViewModels;
 using Werewolf.Client.Share;
 
-namespace ClientGUI.Views;
+namespace ClientGUI.Views.Pages;
 
 /// <summary>
-/// 设置窗口：集中管理所有客户端设置（外观主题、主界面视图、上次使用的连接信息），
-/// 并在 v2.5.0 第 5 / 7 条起承载「修改密码…」与「服务器设置…」两个账号入口。
+/// 设置页（v2.6.0 S2 由 <c>SettingsWindow</c> 搬迁而来）：集中管理所有客户端设置
+/// （外观主题、主界面视图、上次使用的连接信息），并承载「修改密码…」与「服务器设置…」两个账号入口。
 ///
-/// 它可以在**任意界面**打开（包括登录时）：
-/// <list type="bullet">
-///   <item>全局快捷键 Ctrl + , —— 由 <see cref="App"/> 注册的 Window 类级处理器统一接管；</item>
-///   <item>主窗口菜单「视图 → 设置…」、登录窗口与房间列表窗口上的「设置」按钮。</item>
+/// 三处与旧窗口**语义不同**，都是页面化带来的（架构 §9.1 S2 的判据 ②③）：
+/// <list type="number">
+///   <item><b>会话来源变了</b>：旧窗口是从「谁当 owner」反推会话
+///         （<c>ResolveSession(Window)</c> 里一串 <c>switch (owner)</c>）；页面里直接拿
+///         <see cref="AppSession.Client"/> —— 会话只有一个，不需要按宿主类型分支（T39 顺带消掉）；</item>
+///   <item><b>不再有「同一时刻只开一个」的静态 <c>_open</c> 守卫</b>：改由页面栈的
+///         **防重复入栈**保证（同 <see cref="PageId"/> 已在栈里就先弹掉再压新的，N5）；</item>
+///   <item><b>关闭 = 出栈</b>：底部「关闭」/ 导航栏「返回」/ Esc 一律走
+///         <see cref="NavigationService.BackAsync"/>，不会退出程序、不会停服务器。</item>
 /// </list>
-/// 同一时刻只允许开一个：重复打开会把已有的窗口激活到前台。
 ///
-/// 账号入口显隐由**会话身份**决定（<see cref="GameClient.IsAdmin"/> 是服务端回执写入的只读值）：
-/// 「修改密码…」登录后可用；「服务器设置…」仅管理员可见。服务端仍会二次校验，客户端只做显隐。
+/// 三栏显隐的联动改由 <see cref="ViewOptions.Notify"/> 广播（不再依赖窗口类的静态事件），
+/// 房间页在 <c>OnEnter</c> / <c>OnLeave</c> 里成对订阅 / 退订（架构 §6.2）。
 /// </summary>
-public partial class SettingsWindow : Window
+public partial class SettingsPage : UserControl, IPage
 {
-    private static SettingsWindow? _open;
+    private readonly AppSession _session;
 
-    /// <summary>主界面「三栏显隐」被改动（主窗口据此同步菜单勾选与布局）。</summary>
-    public static event Action? ViewOptionsChanged;
-
-    /// <summary>载入或恢复默认设置时，屏蔽控件事件，避免把「回填」当成「用户改动」。</summary>
+    /// <summary>载入或恢复默认设置时屏蔽控件事件，避免把「回填」当成「用户改动」。</summary>
     private bool _loading;
-
-    /// <summary>本次打开所带的会话（可为 null —— 登录前打开设置时就没有会话）。</summary>
-    private GameClient? _session;
 
     /// <summary>账号浮层当前承载的业务（修改密码 / 服务器设置 / 无）。</summary>
     private enum AccountOverlayMode { None, ChangePassword, ServerSettings }
@@ -41,10 +40,27 @@ public partial class SettingsWindow : Window
     private ChangePasswordDialog? _cpDialog;
     private ServerSettingsDialog? _ssDialog;
 
-    public SettingsWindow()
+    public SettingsPage(AppSession session)
     {
         InitializeComponent();
+        _session = session;
+    }
 
+    // ==================== IPage ====================
+
+    public PageId Id => PageId.Settings;
+
+    public string Title => "设置";
+
+    /// <summary>浮层可以返回（Esc / 返回 / 底部「关闭」都走同一个入口，N9）。</summary>
+    public bool CanGoBack => true;
+
+    /// <summary>
+    /// 进场：**每次都从磁盘重读一遍**（主题可能被别处改过），并按当前会话重算账号入口显隐。
+    /// 与旧窗口「构造时读一次」相比这更准确：页面可以被反复进出，而会话身份可能在两次之间变了。
+    /// </summary>
+    public void OnEnter()
+    {
         _loading = true;
         LoadFromState();
         _loading = false;
@@ -52,53 +68,20 @@ public partial class SettingsWindow : Window
         ApplyAccountSection();
     }
 
-    /// <summary>打开设置窗口（已打开则激活到前台）。<paramref name="owner"/> 不可用时自动降级为无属主。</summary>
-    public static void Open(Window? owner) => Open(owner, ResolveSession(owner));
-
-    /// <summary>
-    /// 打开设置窗口（带会话）。会话决定「账号设置」标签页上的入口显隐：
-    /// 已登录 → 可改密码；管理员 → 多一个「服务器设置…」。
-    /// </summary>
-    public static void Open(Window? owner, GameClient? session)
+    /// <summary>退场：收起浮层、丢掉浮层正文（不留下悬挂的订阅）。</summary>
+    public void OnLeave()
     {
-        if (_open != null)
-        {
-            try { _open.Activate(); } catch { /* 激活失败无需处理 */ }
-            return;
-        }
-
-        var window = new SettingsWindow
-        {
-            Owner = owner is { IsLoaded: true } ? owner : null,
-            WindowStartupLocation = owner is { IsLoaded: true }
-                ? WindowStartupLocation.CenterOwner
-                : WindowStartupLocation.CenterScreen,
-            _session = session
-        };
-        window.ApplyAccountSection();
-
-        _open = window;
-        try
-        {
-            window.ShowDialog();
-        }
-        finally
-        {
-            _open = null;
-        }
+        AccountOverlay.CloseDialog();
+        _overlayMode = AccountOverlayMode.None;
+        _cpDialog = null;
+        _ssDialog = null;
     }
 
-    /// <summary>
-    /// 从打开设置的窗口里取会话（Ctrl + , 的全局入口只拿得到 owner 窗口）。
-    /// 认识的三个窗口各自暴露只读 <c>Session</c>；其余窗口（对话框等）没有会话。
-    /// </summary>
-    private static GameClient? ResolveSession(Window? owner) => owner switch
-    {
-        LoginWindow login => login.Session,
-        RoomListWindow list => list.Session,
-        MainWindow main => main.Session,
-        _ => null
-    };
+    /// <summary>返回拦截：设置是即改即存的，没有「未保存」状态，一律放行。</summary>
+    public Task<bool> OnBackRequestedAsync() => Task.FromResult(true);
+
+    /// <summary>本页唯一认识的会话（不存在「按宿主窗口类型反推」这条分支）。</summary>
+    private GameClient Client => _session.Client;
 
     // ==================== 读取 / 展示 ====================
 
@@ -113,6 +96,7 @@ public partial class SettingsWindow : Window
         ShowPlayers.IsChecked = state.ShowPlayers;
         ShowChat.IsChecked = state.ShowChat;
         ShowActions.IsChecked = state.ShowActions;
+        PageAnimation.IsChecked = state.PageTransitionAnimation;
 
         ServerText.Text = Blank(state.ServerUrl);
         UserText.Text = Blank(state.Username);
@@ -141,8 +125,8 @@ public partial class SettingsWindow : Window
     /// </summary>
     private void ApplyAccountSection()
     {
-        var loggedIn = _session is { IsLoggedIn: true };
-        var isAdmin = _session is { IsAdmin: true };
+        var loggedIn = Client.IsLoggedIn;
+        var isAdmin = Client.IsAdmin;
         var (changeEnabled, serverVisible) = AccountEntryVisibility(loggedIn, isAdmin);
 
         ChangePasswordButton.IsEnabled = changeEnabled;
@@ -183,9 +167,13 @@ public partial class SettingsWindow : Window
         state.ShowPlayers = ShowPlayers.IsChecked == true;
         state.ShowChat = ShowChat.IsChecked == true;
         state.ShowActions = ShowActions.IsChecked == true;
+
+        // v2.6.0 S7：动效开关只影响自己（不触发 ViewOptions 广播）。
+        state.PageTransitionAnimation = PageAnimation.IsChecked == true;
         UiStateStore.Save();
 
-        ViewOptionsChanged?.Invoke();
+        // 房间页据此同步「视图」菜单的勾选与三栏布局（架构 §6.2 的订阅/退订成对）。
+        ViewOptions.Notify();
     }
 
     private void Reset_OnClick(object sender, RoutedEventArgs e)
@@ -203,22 +191,21 @@ public partial class SettingsWindow : Window
         LoadFromState();
         _loading = false;
 
-        ViewOptionsChanged?.Invoke();
+        ViewOptions.Notify();
     }
 
-    private void Close_OnClick(object sender, RoutedEventArgs e) => Close();
+    /// <summary>底部「关闭」= 出栈（不是关程序：不退出房间、不断连接、不停服务器）。</summary>
+    private void Close_OnClick(object sender, RoutedEventArgs e) => _ = _session.Navigation.BackAsync();
 
-    private void Window_OnKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape) Close();
-    }
+    /// <summary>导航栏「返回」：与「关闭」同一条路径。</summary>
+    private void Back_OnClick(object sender, RoutedEventArgs e) => _ = _session.Navigation.BackAsync();
 
-    // ==================== 账号浮层（v2.5.0 第 5 / 7 条） ====================
+    // ==================== 账号浮层 ====================
 
     /// <summary>「修改密码…」：打开浮层，正文是三框的 <see cref="ChangePasswordDialog"/>。</summary>
     private void ChangePassword_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_session is not { IsLoggedIn: true }) return;
+        if (!Client.IsLoggedIn) return;
 
         _ssDialog = null;
         var dialog = new ChangePasswordDialog();
@@ -246,7 +233,7 @@ public partial class SettingsWindow : Window
     /// <summary>「服务器设置…」（仅管理员）：打开浮层，正文是资源编辑器 <see cref="ServerSettingsDialog"/>。</summary>
     private void ServerSettings_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_session is not { IsAdmin: true }) return;
+        if (!Client.IsAdmin) return;
 
         _cpDialog = null;
         var dialog = new ServerSettingsDialog();
@@ -274,20 +261,25 @@ public partial class SettingsWindow : Window
     /// <summary>拉取资源清单并自动载入第一份资源（失败时浮层里已显示人话原因）。</summary>
     private async Task LoadServerSettingsAsync(ServerSettingsDialog dialog)
     {
-        if (_session == null) return;
-        await dialog.LoadAsync(_session);
-        AccountOverlay.PrimaryEnabled = dialog.ViewModel.CanSave;
+        try
+        {
+            await dialog.LoadAsync(Client);
+        }
+        catch
+        {
+            // 网络异常由对话框自己的视图模型写进 Message（这里只保证不把异常抛到 UI 线程）。
+        }
+
+        if (_ssDialog == dialog) AccountOverlay.PrimaryEnabled = dialog.ViewModel.CanSave;
     }
 
     /// <summary>浮层主按钮：按当前业务分派（修改密码 → 提交；服务器设置 → 保存）。</summary>
     private async void AccountOverlay_OnPrimaryClick(object sender, RoutedEventArgs e)
     {
-        if (_session == null) return;
-
         if (_overlayMode == AccountOverlayMode.ChangePassword && _cpDialog != null)
         {
             AccountOverlay.PrimaryEnabled = false;
-            var ok = await _cpDialog.ViewModel.SubmitAsync(_session);
+            var ok = await _cpDialog.ViewModel.SubmitAsync(Client);
 
             // 成功 / 失败都以服务端文案为准，就地显示；成功时视图模型已清空输入框。
             AccountOverlay.Message = _cpDialog.ViewModel.Message;
@@ -300,7 +292,7 @@ public partial class SettingsWindow : Window
         if (_overlayMode == AccountOverlayMode.ServerSettings && _ssDialog != null)
         {
             AccountOverlay.PrimaryEnabled = false;
-            await _ssDialog.SaveAsync(_session);
+            await _ssDialog.SaveAsync(Client);
 
             AccountOverlay.Message = _ssDialog.ViewModel.Message;
             AccountOverlay.MessageIsError = _ssDialog.ViewModel.MessageIsError;

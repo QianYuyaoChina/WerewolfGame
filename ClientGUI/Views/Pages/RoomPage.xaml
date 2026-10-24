@@ -1,4 +1,18 @@
-<Window x:Class="ClientGUI.MainWindow"
+<!--
+    注意：页面根元素上的 Background/Foreground 必须用 DynamicResource；
+    页内 RelativeSource 的 AncestorType 一律是 UserControl。
+
+    本页由 MainWindow.xaml 原样搬迁（v2.6.0 S1 页面化，架构 §9.1）。
+    迁移范围（架构 D1 / C3）：顶部菜单栏 + 导航栏 + 底部状态条 + 三栏容器。
+    本页**不套 375 手机逻辑宽度** —— 冒烟会对它 Measure(1220,780)，页面设计尺寸 1220×780。
+
+    Q3=A（用户裁定）：桌面端菜单栏**留在本页顶部**（不搬进导航栏「···」溢出菜单）——
+    它承载 Ctrl+G / Ctrl+I / Ctrl+L 与三栏显隐开关，搬走会丢掉可发现性。
+
+    窗口几何（左 / 上 / 宽 / 高 / 最大化）不再由本页负责：单窗口后只有一个外壳窗口，
+    几何恢复与保存已搬到 ShellWindow（架构 §7.2）；本页只保存「三栏显隐」。
+-->
+<UserControl x:Class="ClientGUI.Views.Pages.RoomPage"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -7,25 +21,14 @@
         xmlns:views="clr-namespace:ClientGUI.Views"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:GameViewModel}"
-        Title="{Binding WindowTitle}"
-        Height="780" Width="1220" MinHeight="640" MinWidth="1000"
-        WindowStartupLocation="CenterScreen"
         Background="{DynamicResource PageBgBrush}"
         Foreground="{DynamicResource TextBrush}"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         TextOptions.TextFormattingMode="Ideal"
         UseLayoutRounding="True"
-        KeyDown="MainWindow_OnKeyDown">
+        KeyDown="Page_OnKeyDown">
 
-    <!--
-        v2.5.0 迁移范围（架构 D1 / C3）：顶部导航栏 + 底部状态条 + 三栏容器。
-        本窗口**不套 375 手机逻辑宽度** —— 冒烟会对它 Measure(1220,780)，且它最小宽度 1000；
-        三栏内部细节（游戏专属面板）列 P1，本轮只让容器跟上。
-
-        桌面端菜单栏（PRD Q13）保留但风格化：它承载 Ctrl+, 等快捷键与显隐开关，
-        不作为移植目标；新增页面一律用「导航栏 + 内容 + 底部操作条」骨架。
-    -->
-    <Window.Resources>
+    <UserControl.Resources>
         <ResourceDictionary>
             <!-- 用 pack URI 定位，保证从任意工作目录启动、或被其他宿主加载时都能解析。
                  Panels 内部已合并 Converters + Controls + AppShell；颜色由 ThemeManager 挂在 Application 级。 -->
@@ -33,11 +36,11 @@
                 <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
-    </Window.Resources>
+    </UserControl.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />  <!-- 菜单栏（桌面端保留） -->
+            <RowDefinition Height="Auto" />  <!-- 菜单栏（桌面端保留，Q3=A） -->
             <RowDefinition Height="Auto" />  <!-- 导航栏 -->
             <RowDefinition Height="*" />     <!-- 主区域（三栏） -->
             <RowDefinition Height="Auto" />  <!-- 底部状态条 -->
@@ -62,7 +65,12 @@
                               Click="Menu_Invite_OnClick"
                               IsEnabled="{Binding HasRoomInfo}" />
                     <Separator Style="{StaticResource MenuSeparator}" />
-                    <MenuItem Header="退出房间" Command="{Binding DisconnectCommand}"
+                    <!--
+                        v2.6.0 S3：不再绑 DisconnectCommand —— 房主独自退房的询问已改成
+                        「入栈 KeepRoomPage 浮层 + 等结果」的异步流程，命令无法在中间 await 出结论。
+                        Click 走的是页面里那条与「返回键」完全相同的路径（见 RoomPage.xaml.cs）。
+                    -->
+                    <MenuItem Header="退出房间" Click="Menu_LeaveRoom_OnClick"
                               IsEnabled="{Binding CanLeaveRoom}" />
                     <MenuItem Header="退出程序" InputGestureText="Ctrl+Q"
                               Click="Menu_Exit_OnClick" />
@@ -99,7 +107,17 @@
                 <!-- 游戏标识：图标 + 中文名 + **游戏主题色**，不同游戏的房间一眼就能分辨。 -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal"
                             HorizontalAlignment="Left" VerticalAlignment="Center">
-                    <Border CornerRadius="999" Padding="12,4" BorderThickness="1"
+                    <!--
+                        v2.6.0 S6：可见「返回」键（手机式导航）。房间页是唯一没有返回键的页面，
+                        之前只能靠菜单「退出房间」/ 导航栏右侧「退出房间」/ Alt+← / Esc。
+                        与那几处**完全同一条路径**（ LeaveRoomFromUiAsync ），
+                        房主独自在房时会先问「是否保留房间」再发 leaveroom。
+                    -->
+                    <Button Content="返回" Style="{StaticResource NavIconButton}"
+                            Click="Back_OnClick"
+                            ToolTip="退出房间并返回房间列表（房主独自在房时会询问是否保留房间）" />
+
+                    <Border CornerRadius="999" Padding="12,4" BorderThickness="1" Margin="4,0,0,0"
                             BorderBrush="{Binding GameAccentHex, Converter={StaticResource HexToBrush}}">
                         <TextBlock Text="{Binding GameLabelText}" FontSize="15" FontWeight="Bold"
                                    Foreground="{Binding GameAccentHex, Converter={StaticResource HexToBrush}}" />
@@ -127,7 +145,7 @@
                         <!--
                             服务器运行胶囊（PRD 8.6）：关主窗口**不停**内置服务器，
                             因此这里要能一眼看出「服务器还在跑」。
-                            放在「已进房」这一组里：MainWindow 只在房间里出现，
+                            放在「已进房」这一组里：本页只在房间里出现，
                             未进房时整组收起，导航栏宽度不变。
                         -->
                         <Border Style="{StaticResource StatusChipBorder}"
@@ -161,8 +179,9 @@
                         <Border Style="{StaticResource StatusChipBorder}">
                             <TextBlock Text="{Binding ConnectionStatus}" Style="{StaticResource ChipText}" />
                         </Border>
+                        <!-- 与菜单「游戏 → 退出房间」同一条 Click 路径（S3：保留房间询问走浮层）。 -->
                         <Button Content="退出房间" Style="{StaticResource NavIconButton}" Margin="8,0,0,0"
-                                Command="{Binding DisconnectCommand}"
+                                Click="Menu_LeaveRoom_OnClick"
                                 IsEnabled="{Binding CanLeaveRoom}" />
                     </StackPanel>
                 </StackPanel>
@@ -173,7 +192,7 @@
         <Grid Grid.Row="2" Margin="12"
               Visibility="{Binding ShowGamePanel, Converter={StaticResource BoolToVisibility}}">
             <Grid.ColumnDefinitions>
-                <!-- 列宽与面板可见性由「视图」菜单驱动（见 MainWindow.xaml.cs）。 -->
+                <!-- 列宽与面板可见性由「视图」菜单驱动（见 RoomPage.xaml.cs）。 -->
                 <ColumnDefinition x:Name="PlayersColumn" Width="286" />
                 <ColumnDefinition x:Name="ChatColumn" Width="*" />
                 <ColumnDefinition x:Name="ActionsColumn" Width="308" />
@@ -210,4 +229,4 @@
             </Grid>
         </Border>
     </Grid>
-</Window>
+</UserControl>

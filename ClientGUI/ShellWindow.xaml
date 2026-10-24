@@ -1,0 +1,47 @@
+<!--
+    ⚠ 根元素上的 Background/Foreground 必须用 DynamicResource（颜色由 ThemeManager 挂在 Application 级）。
+
+    单窗口外壳（v2.6.0 S1，架构 D1 / D6）：整个程序**只有这一个** Window，
+    里面是一个 ContentControl，内容由 NavigationService 换页。
+    页面的导航栏留在每个页面自己身上（不抽到这里）—— 这是既有 54 + 17 + 23 条
+    导航标题几何居中 / 主按钮通栏断言不被推翻的前提（架构 §14）。
+
+    硬规则（架构 D6）：
+      · 背景用 BgBrush（窗口底），页面自己用 PageBgBrush；
+      · **禁止**颜色字面量、禁止 StaticResource 引颜色；
+      · 不做自绘标题栏（WindowStyle=None 会丢最小化 / 最大化 / 贴边 / 无障碍）；
+      ⚠ v2.6.0 S7：原 D6 写着「不做页面转场动画」，已按用户明确要求**显式推翻**
+      （见 SHELL-ARCHITECTURE §26）。动画由 ShellWindow.xaml.cs 在切页时临时套一层
+      Grid 实现，**静止态不变式保持**：动画一结束 PageHost 的内容仍是「就是那一页」，
+      因此「外壳只有一个页面宿主」的既有断言一条未改。
+-->
+<Window x:Class="ClientGUI.ShellWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Title="狼人杀"
+        Height="720" Width="1020" MinHeight="520" MinWidth="760"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource BgBrush}"
+        Foreground="{DynamicResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        UseLayoutRounding="True"
+        PreviewKeyDown="Shell_OnPreviewKeyDown"
+        Closing="Shell_OnClosing">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <!-- 与各页面同一份主题字典（Panels 已合并 Converters + Controls + AppShell）。 -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ClientGUI;component/Themes/Panels.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <!-- 页面宿主：内容必须撑满（ContentControl 默认 Left/Top，会缩成内容大小）。 -->
+    <ContentControl x:Name="PageHost"
+                    HorizontalContentAlignment="Stretch"
+                    VerticalContentAlignment="Stretch" />
+</Window>

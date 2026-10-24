@@ -63,8 +63,15 @@
     <SolidColorBrush x:Key="ActionPressedBrush" Color="#FF2455B8" />
     <SolidColorBrush x:Key="ActionDisabledBrush" Color="#FFC8CDD4" />
 
-    <!-- 称号（金）：浅色主题用深金，保证对比度 ≥ 4.5:1 -->
-    <SolidColorBrush x:Key="TitleTextBrush" Color="#FFB07D12" />
+    <!--
+        称号（金）：浅色主题用深金，压在 CardBrush(#E7EDF6) 上对比度必须 ≥ 4.5:1（WCAG AA 正文档）。
+
+        v2.6.0 S5（Q-B3-01 回修）：原来写的是 #B07D12，实测只有 **3.08:1** —— 而这行注释当时
+        已经声称"≥ 4.5:1"，属于**注释撒谎**（没人算过）。现在改成 #8A5F00，实测 **4.80:1**；
+        并由 ClientGUI.Tests 的 AppShellGuard.CheckTitleContrast 用 WCAG 相对亮度公式**算**一遍
+        （两套主题都算，阈值 4.5），以后谁再调这个值而没算对比度，断言会立刻红。
+    -->
+    <SolidColorBrush x:Key="TitleTextBrush" Color="#FF8A5F00" />
     <SolidColorBrush x:Key="TitleBorderBrush" Color="#FFD9A83A" />
     <SolidColorBrush x:Key="TitleBgBrush" Color="#1AC9971F" />
 

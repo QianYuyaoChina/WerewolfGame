@@ -168,6 +168,14 @@ if (Array.IndexOf(args, "--embedded") >= 0)
 {
     Console.WriteLine("════════ 内置服务器端到端自检 ════════");
     var embeddedOk = await EmbeddedServerProbe.RunAsync();
+
+    // v2.6.0 S1：QA 独立复核 —— Q1=B「列表页返回登录页不停服务器」需要真服务器才验得准。
+    await S1QaGuard.RunLiveQ1BChecksAsync();
+
+    // v2.6.0 S3 · T43：保留房间**真端到端**（真内置服务器 + 真页面栈 + 真 leaveroom）+
+    // 返回新鲜度（房间 → 关于 → 更新日志 → 返回 → 返回，玩家名单逐项比对）。
+    await S3QaGuard.RunLiveChecksAsync();
+
     Console.WriteLine();
     foreach (var f in Check.FailureList) Console.WriteLine("   · " + f);
     Console.WriteLine(Check.FailureList.Count == 0
@@ -242,6 +250,22 @@ EmbeddedServerQaAudit.RunLogicChecks();
 
 // v2.5.0 B4 / B5 的能力探针（内置管理员 / 可编辑资源 / 修改密码 / 一键开服 / 导航居中）。
 V25BatchProbe.RunLogicChecks();
+
+// v2.6.0 S1：页面化专项（导航栈 / 关闭意图映射 / 退订 / 返回键位）—— 纯逻辑批次。
+PageCatalog.RunLogicChecks();
+
+// v2.6.0 S1：QA 独立验收（不复用 PageCatalog 的判定，另写一份重证同一批结论）。
+S1QaGuard.RunLogicChecks();
+
+// v2.6.0 S2：QA 独立验收（浮层语义 / 结果通道 / 浮层叠浮层 / 七页工厂接线）。
+S2QaGuard.RunLogicChecks();
+
+// v2.6.0 B3 页面化后：QA 独立复核（彩蛋 5 击窗口 / 称号校验口径 / 服务端权威 / 状态下发）。
+B3QaGuard.RunLogicChecks();
+
+// v2.6.0 S3：QA 独立验收（关于 / 更新日志 / 保留房间三页 + 唯一判定点 + 收尾不弹窗）。
+// 判据是**交付前**就登记在 docs/v25/SHELL-ARCHITECTURE.md §18 的 A–P，跑完只回填实测列。
+S3QaGuard.RunLogicChecks();
 
 Console.WriteLine();
 AppShellQaGuard.RunDocsAndSourceGuards();

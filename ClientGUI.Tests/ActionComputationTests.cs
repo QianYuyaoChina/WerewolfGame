@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Text.Json;
+using ClientGUI.Services;
 using ClientGUI.ViewModels;
 using ClientGUI.ViewModels.Games.Werewolf;
 using Werewolf.Client.Share;
@@ -46,8 +47,6 @@ public static class ActionComputationTests
         public int YourId => Host.YourId;
         public bool IsAlive => Host.IsAlive;
         public bool NeedsKeepRoomDecision => Host.NeedsKeepRoomDecision;
-        public Func<bool>? ConfirmKeepRoom { get => Host.ConfirmKeepRoom; set => Host.ConfirmKeepRoom = value; }
-        public bool ResolveKeepRoom() => Host.ResolveKeepRoom();
         public void SelectPlayer(PlayerRow row) => Host.SelectPlayer(row);
 
         // ---- 游戏面板侧 ----
@@ -139,6 +138,19 @@ public static class ActionComputationTests
     /// 回归：房主独自一人时点「退出房间」必须先询问是否保留房间。
     /// 早期版本里主界面拿不到初始状态（进房广播早于界面创建），`IsHost` 一直是 false，
     /// 于是既不显示房主标识，也永远不会弹询问。
+    ///
+    /// ⚠ S4 迁移（T47 / T48）：视图模型上的同步询问入口
+    ///（`ConfirmKeepRoom` 的 <c>Func&lt;bool&gt;</c> 注入 + `ResolveKeepRoom()`）已整体删除，
+    /// 询问搬到 <c>RoomPage</c> 的浮层（<c>PushForDecisionAsync</c> + <c>LeaveRoomAsync(bool)</c>）。
+    /// 因此这里的判据拆成两半，**覆盖不减**：
+    /// <list type="bullet">
+    ///   <item>留在这里：视图模型的<b>闸门</b>（<c>NeedsKeepRoomDecision</c> 何时为真）；</item>
+    ///   <item>换成 <see cref="KeepRoomDecision.Resolve"/>：三态翻译（这条纯函数现在是**唯一**判定点，
+    ///         端到端证明在 <c>--ui</c> 的 <c>AppShellGuard.CheckKeepRoomDecision</c>）。</item>
+    /// </list>
+    /// ⚠ 语义翻面（T48）：旧断言是「未注入询问 → 默认**不保留**」（源码里的 `?? false`，正是 QA 提的 Q-S3-02）。
+    /// 新口径是「没拿到选择（<c>null</c>）→ 默认**保留**」—— 空选择不该误删房间，这条现在由
+    /// <see cref="KeepRoomDecision.Resolve"/> 单点保证。
     /// </summary>
     private static void KeepRoomPrompt()
     {
@@ -148,14 +160,13 @@ public static class ActionComputationTests
         Check.True(host.IsJoined, "保留询问：收到带房间号的状态即视为已在房间");
         Check.True(host.NeedsKeepRoomDecision, "保留询问：房主独自一人时应询问");
 
-        var asked = false;
-        host.ConfirmKeepRoom = () => { asked = true; return true; };
-        Check.True(host.ResolveKeepRoom(), "保留询问：选择保留时判定为保留");
-        Check.True(asked, "保留询问：确实调用了询问");
-
-        // 未注入询问（非 GUI 宿主）时按「不保留」处理。
-        var noPrompt = Apply(State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 1, roomId: "ABCDE"));
-        Check.False(noPrompt.ResolveKeepRoom(), "保留询问：未注入询问时默认不保留");
+        // 三态翻译（替代已删除的 ConfirmKeepRoom / ResolveKeepRoom）：
+        // ① 显式选「保留房间」→ 保留；② 显式选「关闭房间」→ 不保留；
+        // ③ 没拿到选择（返回 / Esc / 外壳 ×）→ **保留**（旧 `?? false` 的反向修正，T48）。
+        Check.True(KeepRoomDecision.Resolve(true), "保留询问：选择保留时判定为保留");
+        Check.False(KeepRoomDecision.Resolve(false), "保留询问：选择关闭房间时判定为不保留");
+        Check.True(KeepRoomDecision.Resolve(null),
+            "保留询问：没拿到选择（返回 / Esc / 外壳 ×）时默认保留 —— 旧 `?? false` 已按 Q-S3-02 翻面");
 
         // 房间里还有别人 → 不询问（房主会自动转让）。
         var withOthers = Apply(State(Phases.Waiting, Roles.Villager, yourId: 0, playerCount: 2, roomId: "ABCDE"));
@@ -166,6 +177,23 @@ public static class ActionComputationTests
         var guest = Apply(State(Phases.Waiting, Roles.Villager, yourId: 1, playerCount: 2, roomId: "ABCDE"));
         Check.False(guest.IsHost, "保留询问：1 号不是房主");
         Check.False(guest.NeedsKeepRoomDecision, "保留询问：非房主不询问");
+
+        // 退出阶段的出口只剩显式的两条（<c>LeaveRoomForShutdownAsync</c> = 不保留；
+        // 页面经 <c>LeaveRoomForPageAsync(bool)</c> 带上用户的选择）—— 不再有"无参 = 隐式询问"。
+        var leaving = typeof(GameViewModel).GetMethods()
+            .Where(m => m.Name.StartsWith("LeaveRoom", StringComparison.Ordinal))
+            .Select(m => $"{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})")
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToList();
+        Check.SequenceEqual(
+            new[]
+            {
+                "LeaveRoomAsync(Boolean)",
+                "LeaveRoomForPageAsync(Boolean)",
+                "LeaveRoomForShutdownAsync()"
+            },
+            leaving,
+            "保留询问：视图模型的退房出口全是显式 keepRoom（实际：" + string.Join(" / ", leaving) + "）");
     }
 
     // ==================== 规则驱动的界面（可配置化回归） ====================

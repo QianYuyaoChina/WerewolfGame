@@ -25,7 +25,7 @@ namespace ClientGUI.Services;
 /// ─── v2.5.0 第 8 条（关主窗口 = 退出房间）之后的触发点分布 ───
 /// 三步编排与 8s 预算**一行未改**，只是触发点收拢了：
 /// <list type="bullet">
-///   <item><b>关主窗口</b>（<c>MainWindow</c>）：<c>CloseIntent.RequiresFullShutdown(RoomWindow) == false</c>
+///   <item><b>在房间里关外壳</b>（S4 前是主窗口）：<c>CloseIntent.RequiresFullShutdown(RoomWindow) == false</c>
 ///         → 只走与菜单「退出房间」完全相同的路径，<b>不调用本类</b>；退出后注销委托，
 ///         将来真正收尾时第 ① 步自然跳过。</item>
 ///   <item><b>关房间列表 / 退出程序 / 系统关机</b>：<c>RequiresFullShutdown == true</c> → 走本类完整三步。</item>
@@ -52,6 +52,18 @@ public static class AppShutdown
 
     /// <summary>是否已进入收尾（供界面判断：收尾期间「已离开房间」不应再触发关闭）。</summary>
     public static bool IsShuttingDown => Volatile.Read(ref _state) != 0;
+
+    /// <summary>
+    /// 收尾时是否真正调用 <c>Application.Shutdown()</c>（v2.6.0 S6，默认 **true**）。
+    ///
+    /// 为什么需要这个开关：S6 修了一个真 bug —— <c>ShutdownMode=OnExplicitShutdown</c> 下
+    /// 「关外壳走完整收尾」只放行了关闭、没有请求退出应用，进程于是留在无窗口状态。
+    /// 修好后，**测试宿主**里任何一次「关外壳」都会把整个测试进程带着退掉
+    /// （`--ui` 要实例化并关闭外壳来验证它能解析）。因此测试宿主在开工时把它置 false：
+    /// 「退出已被请求」这件事由纯函数 <see cref="CloseIntent.AfterConfirm"/> 断言，
+    /// 不需要真的把进程退掉。产品代码永远保持 true。
+    /// </summary>
+    public static bool ExitApplication { get; set; } = true;
 
     /// <summary>关窗确认的文案（含其他玩家人数）。</summary>
     public static string ConfirmMessage { get; private set; } = "";

@@ -21,6 +21,13 @@ public sealed class UiState
     public bool ShowChat { get; set; } = true;
     public bool ShowActions { get; set; } = true;
 
+    // ---- 页面切换动效（v2.6.0 S7；默认开，设置 → 主界面可关） ----
+    /// <summary>
+    /// 切页是否播放滑动动画（像手机系统那样）。关掉后立即切换、无动画；
+    /// 不影响任何功能，只影响观感。
+    /// </summary>
+    public bool PageTransitionAnimation { get; set; } = true;
+
     // ---- 登录窗口：上次填过的地址与用户名（不保存密码） ----
     public string ServerUrl { get; set; } = "";
     public string Username { get; set; } = "";
